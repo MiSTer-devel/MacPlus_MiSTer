@@ -33,7 +33,7 @@ module dataController_top(
 	output [15:0] memoryDataOut,
 
 	// keyboard:
-	input [64:0] ps2_key,
+	input [10:0] ps2_key,
 	output       capslock,
 
 	// mouse:

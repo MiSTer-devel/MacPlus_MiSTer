@@ -2,7 +2,7 @@
 //  Macintosh Plus
 //
 //  Port to MiSTer
-//  Copyright (C) 2017 Sorgelig
+//  Copyright (C) 2017,2018 Sorgelig
 //
 //  This program is free software; you can redistribute it and/or modify it
 //  under the terms of the GNU General Public License as published by the Free
@@ -29,7 +29,7 @@ module emu
 	input         RESET,
 
 	//Must be passed to hps_io module
-	inout  [43:0] HPS_BUS,
+	inout  [44:0] HPS_BUS,
 
 	//Base video clock. Usually equals to CLK_SYS.
 	output        CLK_VIDEO,
@@ -51,7 +51,7 @@ module emu
 
 	output        LED_USER,  // 1 - ON, 0 - OFF.
 
-	// b[1]: 0 - LED status is system status ORed with b[0]
+	// b[1]: 0 - LED status is system status OR'd with b[0]
 	//       1 - LED status is controled solely by b[0]
 	// hint: supply 2'b00 to let the system control the LED.
 	output  [1:0] LED_POWER,
@@ -59,7 +59,8 @@ module emu
 
 	output [15:0] AUDIO_L,
 	output [15:0] AUDIO_R,
-	output        AUDIO_S, // 1 - signed audio samples, 0 - unsigned
+	output        AUDIO_S,   // 1 - signed audio samples, 0 - unsigned
+	output  [1:0] AUDIO_MIX, // 0 - no mix, 1 - 25%, 2 - 50%, 3 - 100% (mono)
 	input         TAPE_IN,
 
 	// SD-SPI
@@ -67,6 +68,7 @@ module emu
 	output        SD_MOSI,
 	input         SD_MISO,
 	output        SD_CS,
+	input         SD_CD,
 
 	//High latency DDR3 RAM interface
 	//Use for non-critical time purposes
@@ -118,7 +120,7 @@ localparam CONF_STR = {
 	"O9A,Memory,512KB,1MB,4MB;",
 	"O5,Speed,Normal,Turbo;",
 	"-;",
-	"T6,Reset;",
+	"R6,Reset;",
 	"V,v1.00.",`BUILD_DATE
 };
 
@@ -191,12 +193,29 @@ wire  [7:0] sd_buff_dout;
 wire  [7:0] sd_buff_din;
 wire        sd_buff_wr;
 
-wire        ioctl_wr;
+reg         ioctl_wr;
+wire        ioctl_write;
 reg         ioctl_wait = 0;
 
-wire [64:0] ps2_key;
+wire [10:0] ps2_key;
 wire [24:0] ps2_mouse;
 wire        capslock;
+
+wire [24:0] ioctl_addr;
+wire  [7:0] ioctl_data;
+
+always @(posedge clk_sys) begin
+	reg [7:0] temp;
+	
+	ioctl_wr <= 0;
+	if(ioctl_write) begin
+		if(~ioctl_addr[0]) temp <= ioctl_data;
+		else begin
+			dio_data <= {temp, ioctl_data};
+			ioctl_wr <= 1;
+		end
+	end
+end
 
 hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 (
@@ -221,9 +240,9 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 	
 	.ioctl_download(dio_download),
 	.ioctl_index(dio_index),
-	.ioctl_wr(ioctl_wr),
-	.ioctl_addr(dio_addr),
-	.ioctl_dout(dio_data),
+	.ioctl_wr(ioctl_write),
+	.ioctl_addr(ioctl_addr),
+	.ioctl_dout(ioctl_data),
 
 	.ioctl_wait(ioctl_wait),
 
@@ -299,6 +318,7 @@ wire [10:0] audio;
 assign AUDIO_L = {audio[10:0], 5'b00000};
 assign AUDIO_R = {audio[10:0], 5'b00000};
 assign AUDIO_S = 0;
+assign AUDIO_MIX = 0;
 
 wire       status_turbo = status[5];
 wire       status_reset = status[6];
@@ -442,9 +462,9 @@ end
 // include ROM download helper
 wire        dio_download;
 reg         dio_write;
-wire [23:0] dio_addr;
+wire [23:0] dio_addr = ioctl_addr[24:1];
 wire  [7:0] dio_index;
-wire [15:0] dio_data;
+reg  [15:0] dio_data;
 
 // good floppy image sizes are 819200 bytes and 409600 bytes
 reg dsk_int_ds, dsk_ext_ds;  // double sided image inserted
