@@ -30,9 +30,9 @@ module sdram
 (
 
 	// interface to the MT48LC16M16 chip
-	inout [15:0]  		sd_data,    // 16 bit bidirectional data bus
+	inout  reg [15:0] sd_data,    // 16 bit bidirectional data bus
 	output reg [12:0]	sd_addr,    // 13 bit multiplexed address bus
-	output reg [1:0] 	sd_dqm,     // two byte masks
+	output     [1:0] 	sd_dqm,     // two byte masks
 	output reg [1:0] 	sd_ba,      // two banks
 	output 				sd_cs,      // a single chip select
 	output 				sd_we,      // write enable
@@ -73,7 +73,6 @@ localparam STATE_FIRST     = 3'd0;   // first state in cycle
 localparam STATE_CMD_START = 3'd1;   // state in which a new command can be started
 localparam STATE_CMD_CONT  = STATE_CMD_START + RASCAS_DELAY; // command can be continued
 localparam STATE_READ      = STATE_CMD_CONT + CAS_LATENCY + 4'd1;
-localparam STATE_HIGHZ     = STATE_READ - 4'd1; // disable output to prevent contention
 
 
 // ---------------------------------------------------------------------
@@ -111,9 +110,7 @@ assign sd_cs  = sd_cmd[3];
 assign sd_ras = sd_cmd[2];
 assign sd_cas = sd_cmd[1];
 assign sd_we  = sd_cmd[0];
-
-// drive ram data lines when writing, set them as inputs otherwise
-assign sd_data = mode[1] ? din_r : 16'bZZZZZZZZZZZZZZZZ;
+assign sd_dqm = sd_addr[12:11];
 
 reg  [1:0] mode;
 reg [15:0] din_r;
@@ -121,8 +118,9 @@ reg  [2:0] stage;
 
 always @(posedge clk) begin
 	reg [12:0] addr_r;
-	reg  [1:0] ds_r;
 	reg        old_sync;
+	
+	sd_data <= 16'hZZZZ;
 	
 	if(|stage) stage <= stage + 1'd1;
 
@@ -147,7 +145,6 @@ always @(posedge clk) begin
 			
 		end
 		mode    <= 0;
-		sd_dqm  <= 2'b11;
 	end else begin
 
 		// normal operation
@@ -161,9 +158,8 @@ always @(posedge clk) begin
 				sd_addr <= { 1'b0, addr[19:8] };
 				sd_ba   <= addr[21:20];
 
-				ds_r    <= ds;
 				din_r   <= din;
-				addr_r  <= { 4'b0010, addr[22], addr[7:0] };  // auto precharge
+				addr_r  <= {we ? ~ds : 2'b00, 2'b10, addr[22], addr[7:0] };  // auto precharge
 			end
 			else begin
 				sd_cmd <= CMD_AUTO_REFRESH;
@@ -175,19 +171,10 @@ always @(posedge clk) begin
 		if(stage == STATE_CMD_CONT && mode) begin
 			sd_cmd  <= mode[1] ? CMD_WRITE : CMD_READ;
 			sd_addr <= addr_r;
-
-			if(mode[1]) sd_dqm <= ~ds_r;
-			else        sd_dqm <= 2'b00;
+			if(mode[1]) sd_data <= din_r;
 		end
 
-		if(stage == STATE_HIGHZ) begin
-			sd_dqm  <= 2'b11; // disable chip output
-			mode[1] <= 0;     // disable data output
-		end
-
-		if(stage == STATE_READ && mode) begin
-			dout <= sd_data;
-		end
+		if(stage == STATE_READ && mode[0]) dout <= sd_data;
 	end
 end
 
