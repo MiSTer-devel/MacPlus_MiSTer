@@ -23,7 +23,7 @@ localparam 	kVisibleWidth = 128,
 				kVisibleHeightEnd = 362,
 				kTotalHeight = 370,
 				kHsyncStart = 135,
-				kHsyncEnd = 151,
+				kHsyncEnd = 152,
 				kVsyncStart = 365,
 				kVsyncEnd = 369,
 				kPixelLatency = 1; // number of clk8 cycles from xpos==0 to when pixel data actually exits the video shift register
@@ -73,8 +73,11 @@ always @(posedge clk) begin
 			xpos <= xpos + 1'b1;
 		end
 
-		hsync <= (xpos >= kHsyncStart+kPixelLatency && xpos <= kHsyncEnd+kPixelLatency);  
-		vsync <= (ypos >= kVsyncStart && ypos <= kVsyncEnd);
+		if(xpos == kHsyncStart+kPixelLatency) begin
+			hsync <= 1;
+			vsync <= (ypos >= kVsyncStart && ypos <= kVsyncEnd);
+		end
+		if(xpos == kHsyncEnd+kPixelLatency) hsync <= 0;
 	end
 end
 
