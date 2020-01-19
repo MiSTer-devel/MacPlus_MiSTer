@@ -284,8 +284,8 @@ module ncr5380
 	(
 		.clk    ( clk ),
 		.rst    ( scsi_rst ),
-		.sel    ( scsi_sel & img_mounted[0] ),
-		.atn    ( scsi_atn & img_mounted[0] ),
+		.sel    ( scsi_sel ),
+		.atn    ( scsi_atn ),
 		
 		.ack    ( scsi_ack ),
 		
@@ -323,8 +323,8 @@ module ncr5380
 	(
 		.clk		( clk ) ,			// input  clk
 		.rst		( scsi_rst ) ,		// input  rst
-		.sel		( scsi_sel & img_mounted[1] ) ,		// input  sel
-		.atn		( scsi_atn & img_mounted[1] ) ,		// input  atn
+		.sel		( scsi_sel ) ,		// input  sel
+		.atn		( scsi_atn ) ,		// input  atn
 		
 		.ack		( scsi_ack ) ,		// input  ack
 		

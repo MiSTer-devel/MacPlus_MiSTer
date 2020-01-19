@@ -141,8 +141,8 @@ assign VIDEO_ARY = status[8] ? 8'd9  : 8'd3;
 localparam CONF_STR = {
 	"MACPLUS;;",
 	"-;",
-	"F0,DSK,Mount Primary Floppy;",
-	"F1,DSK,Mount Secondary Floppy;",
+	"F0,DSK,Mount Pri Floppy;",
+	"F1,DSK,Mount Sec Floppy;",
 	"-;",
 	"S0,VHD,Mount HDD - SCSI2;",
 	"S1,VHD,Mount HDD - SCSI6 (boot);",
@@ -314,6 +314,42 @@ TG68KdotC_Kernel #(0,0,0,0,0,0) m68k
 	.nResetOut      ( _cpuResetOut   ),
 	.FC             (                )
 );
+
+/*
+fx68k M68K
+(
+	.clk		( clk_sys ),
+	
+	.extReset( !_cpuReset ),
+	.pwrUp	( !_cpuReset ),
+	
+	.enPhi1	(M68K_CLKENp),
+	.enPhi2	(M68K_CLKENn),
+
+	.eRWn		( _cpuRW ),
+	.ASn		(M68K_AS_N),
+	.UDSn		( _cpuUDS ),
+	.LDSn		( _cpuLDS ),
+
+	.FC0(M68K_FC[0]),
+	.FC1(M68K_FC[1]),
+	.FC2(M68K_FC[2]),
+
+	.BGn(M68K_BG_N),
+	.BRn(M68K_BR_N),
+	.BGACKn(M68K_BGACK_N),
+
+	.DTACKn(M68K_MBUS_DTACK_N),
+	.VPAn(~M68K_INTACK),
+	.BERRn(1),
+	.IPL0n( _cpuIPL[0] ),
+	.IPL1n( _cpuIPL[1] ),
+	.IPL2n( _cpuIPL[2] ),
+	.iEdb( cpuDataIn ),
+	.oEdb( cpuDataOut ),
+	.eab( {cpuAddrHi, cpuAddr} )
+);
+*/
 
 assign VGA_R = {8{pixelOut}};
 assign VGA_G = {8{pixelOut}};
