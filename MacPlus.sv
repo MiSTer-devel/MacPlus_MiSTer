@@ -215,7 +215,7 @@ wire  [1:0] diskMotor, diskAct, diskEject;
 // the status register is controlled by the on screen display (OSD)
 wire [31:0] status;
 wire  [1:0] buttons;
-wire  [2:0] img_mounted;
+wire  [1:0] img_mounted;
 wire [15:0] sd_req_type;
 wire [31:0] sd_lba;
 wire  [1:0] sd_rd;
@@ -314,42 +314,6 @@ TG68KdotC_Kernel #(0,0,0,0,0,0) m68k
 	.nResetOut      ( _cpuResetOut   ),
 	.FC             (                )
 );
-
-/*
-fx68k M68K
-(
-	.clk		( clk_sys ),
-	
-	.extReset( !_cpuReset ),
-	.pwrUp	( !_cpuReset ),
-	
-	.enPhi1	(M68K_CLKENp),
-	.enPhi2	(M68K_CLKENn),
-
-	.eRWn		( _cpuRW ),
-	.ASn		(M68K_AS_N),
-	.UDSn		( _cpuUDS ),
-	.LDSn		( _cpuLDS ),
-
-	.FC0(M68K_FC[0]),
-	.FC1(M68K_FC[1]),
-	.FC2(M68K_FC[2]),
-
-	.BGn(M68K_BG_N),
-	.BRn(M68K_BR_N),
-	.BGACKn(M68K_BGACK_N),
-
-	.DTACKn(M68K_MBUS_DTACK_N),
-	.VPAn(~M68K_INTACK),
-	.BERRn(1),
-	.IPL0n( _cpuIPL[0] ),
-	.IPL1n( _cpuIPL[1] ),
-	.IPL2n( _cpuIPL[2] ),
-	.iEdb( cpuDataIn ),
-	.oEdb( cpuDataOut ),
-	.eab( {cpuAddrHi, cpuAddr} )
-);
-*/
 
 assign VGA_R = {8{pixelOut}};
 assign VGA_G = {8{pixelOut}};
