@@ -28,7 +28,7 @@
 
 // WIDE=1 for 16 bit file I/O
 // VDNUM 1-4
-module hps_io #(parameter STRLEN=0, PS2DIV=0, WIDE=0, VDNUM=1, PS2WE=0)
+module hps_io #(parameter STRLEN=0, PS2DIV=0, WIDE=0, VDNUM=2, PS2WE=0)
 (
 	input             clk_sys,
 	inout      [45:0] HPS_BUS,

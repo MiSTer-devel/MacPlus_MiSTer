@@ -104,11 +104,12 @@ wire [7:0] inquiry_dout =
 
 		(data_cnt == 32'd26)?"S":(data_cnt == 32'd27)?"T":
 		(data_cnt == 32'd28)?"2":(data_cnt == 32'd29)?"2":
-		(data_cnt == 32'd30)?"5":(data_cnt == 32'd31)?"N":
+		(data_cnt == 32'd30)?"5":(data_cnt == 32'd31)?"N" + ID:	// TESTING. ElectronAsh.
 		8'h00;
 
 // output of read capacity command
-wire [31:0] capacity = 32'd41056;   // 40960 + 96 blocks = 20MB
+//wire [31:0] capacity = 32'd41056;   // 40960 + 96 blocks = 20MB
+wire [31:0] capacity = 32'd1024096;   // 1024000 + 96 blocks = 500MB
 wire [31:0] capacity_m1 = capacity - 32'd1;
 wire [7:0] read_capacity_dout =
 		(data_cnt == 32'd0 )?capacity_m1[31:24]:

@@ -141,12 +141,13 @@ assign VIDEO_ARY = status[8] ? 8'd9  : 8'd3;
 localparam CONF_STR = {
 	"MACPLUS;;",
 	"-;",
-	"F,DSK;",
-	"F,DSK;",
-	"S,VHD;",
+	"F0,DSK,Mount Pri Floppy;",
+	"F1,DSK,Mount Sec Floppy;",
+	"-;",
+	"S0,VHD,Mount HDD - SCSI2;",
+	"S1,VHD,Mount HDD - SCSI6 (boot);",
 	"-;",
 	"O8,Aspect ratio,4:3,16:9;",
-	"-;",
 	"O9A,Memory,512KB,1MB,4MB;",
 	"O5,Speed,Normal,Turbo;",
 	"-;",
@@ -214,9 +215,11 @@ wire  [1:0] diskMotor, diskAct, diskEject;
 // the status register is controlled by the on screen display (OSD)
 wire [31:0] status;
 wire  [1:0] buttons;
+wire  [1:0] img_mounted;
+wire [15:0] sd_req_type;
 wire [31:0] sd_lba;
-wire        sd_rd;
-wire        sd_wr;
+wire  [1:0] sd_rd;
+wire  [1:0] sd_wr;
 wire        sd_ack;
 wire  [8:0] sd_buff_addr;
 wire  [7:0] sd_buff_dout;
@@ -257,6 +260,9 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 	.buttons(buttons),
 	.status(status),
 
+	.img_mounted(img_mounted),
+	
+	.sd_req_type(sd_req_type),
 	.sd_lba(sd_lba),
 	.sd_rd(sd_rd),
 	.sd_wr(sd_wr),
@@ -463,7 +469,10 @@ dataController_top dc0
 	.diskMotor(diskMotor),
 	.diskAct(diskAct),
 
+	.img_mounted(img_mounted),
+	
 	// block device interface for scsi disk
+	.io_req_type(sd_req_type),
 	.io_lba(sd_lba),
 	.io_rd(sd_rd),
 	.io_wr(sd_wr),
