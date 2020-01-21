@@ -168,13 +168,17 @@ pll pll
 	.locked(pll_locked)
 );
 
-wire cep   = (stage == 0);
-wire cen   = (stage == 4);
-wire cel   = (stage == 7);
-wire cepix = !stage[1:0];
+reg cep,cen,cel,cepix;
+always @(posedge clk_sys) begin
+	reg [2:0] div;
 
-reg [2:0] stage;
-always @(negedge clk_sys) stage <= stage + 1'd1;
+	div <= div + 1'd1;
+
+	cep   <= (div == 0);
+	cen   <= (div == 4);
+	cel   <= (div == 7);
+	cepix <= !div[1:0];
+end
 
 ///////////////////////////////////////////////////
 
