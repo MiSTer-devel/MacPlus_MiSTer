@@ -141,8 +141,8 @@ assign VIDEO_ARY = status[8] ? 8'd9  : 8'd3;
 localparam CONF_STR = {
 	"MACPLUS;;",
 	"-;",
-	"F0,DSK,Mount Pri Floppy;",
-	"F1,DSK,Mount Sec Floppy;",
+	"F1,DSK,Mount Pri Floppy;",
+	"F2,DSK,Mount Sec Floppy;",
 	"-;",
 	"S0,VHD,Mount HDD-0(#2);",
 	"S1,VHD,Mount HDD-1(#6);",
