@@ -165,7 +165,6 @@ pll pll
 	.refclk(CLK_50M),
 	.rst(0),
 	.outclk_0(clk_sys),
-	.outclk_1(SDRAM_CLK),
 	.locked(pll_locked)
 );
 
@@ -589,7 +588,7 @@ sdram sdram
 	.clk     ( clk_sys     ),
 	.sync    ( cep         ),
 
-	// interface to the MT48LC16M16 chip
+	.sd_clk  ( SDRAM_CLK   ),
 	.sd_data ( SDRAM_DQ    ),
 	.sd_addr ( SDRAM_A     ),
 	.sd_dqm  ( {SDRAM_DQMH, SDRAM_DQML} ),
