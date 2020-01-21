@@ -144,8 +144,8 @@ localparam CONF_STR = {
 	"F0,DSK,Mount Pri Floppy;",
 	"F1,DSK,Mount Sec Floppy;",
 	"-;",
-	"S0,VHD,Mount HDD - SCSI2;",
-	"S1,VHD,Mount HDD - SCSI6 (boot);",
+	"S0,VHD,Mount HDD-0(#2);",
+	"S1,VHD,Mount HDD-1(#6);",
 	"-;",
 	"O8,Aspect ratio,4:3,16:9;",
 	"O9A,Memory,512KB,1MB,4MB;",
@@ -250,7 +250,7 @@ always @(posedge clk_sys) begin
 	end
 end
 
-hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
+hps_io #(.STRLEN($size(CONF_STR)>>3), .VDNUM(2)) hps_io
 (
 	.clk_sys(clk_sys),
 	.HPS_BUS(HPS_BUS),

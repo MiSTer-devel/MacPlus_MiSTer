@@ -38,7 +38,7 @@ module scsi
 
    
 // SCSI device id
-parameter ID = 0; 
+parameter [7:0] ID = 0; 
 
 `define PHASE_IDLE        3'd0
 `define PHASE_CMD_IN      3'd1

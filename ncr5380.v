@@ -268,7 +268,7 @@ module ncr5380
    
 	assign io_lba      = (scsi2_bsy) ? io_lba_2 : io_lba_6;
 	assign sd_buff_din = (scsi2_bsy) ? sd_buff_din_2 : sd_buff_din_6;
-	assign sd_req_type = 16'h0000;	// Not used atm. Could be used for CD-ROM sector requests later. ElectronAsh.
+	assign io_req_type = 16'h0000;	// Not used atm. Could be used for CD-ROM sector requests later. ElectronAsh.
 	
 	
    // input signals from target 2
