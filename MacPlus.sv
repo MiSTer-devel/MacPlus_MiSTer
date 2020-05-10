@@ -144,8 +144,7 @@ localparam CONF_STR = {
 	"F1,DSK,Mount Pri Floppy;",
 	"F2,DSK,Mount Sec Floppy;",
 	"-;",
-	"S0,VHD,Mount HDD-0(#2);",
-	"S1,VHD,Mount HDD-1(#6);",
+	"S0,VHD,Mount HDD;",
 	"-;",
 	"O8,Aspect ratio,4:3,16:9;",
 	"O9A,Memory,512KB,1MB,4MB;",
@@ -218,11 +217,9 @@ wire  [1:0] diskMotor, diskAct, diskEject;
 // the status register is controlled by the on screen display (OSD)
 wire [31:0] status;
 wire  [1:0] buttons;
-wire  [1:0] img_mounted;
-wire [15:0] sd_req_type;
 wire [31:0] sd_lba;
-wire  [1:0] sd_rd;
-wire  [1:0] sd_wr;
+wire        sd_rd;
+wire        sd_wr;
 wire        sd_ack;
 wire  [8:0] sd_buff_addr;
 wire  [7:0] sd_buff_dout;
@@ -253,7 +250,7 @@ always @(posedge clk_sys) begin
 	end
 end
 
-hps_io #(.STRLEN($size(CONF_STR)>>3), .VDNUM(2)) hps_io
+hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 (
 	.clk_sys(clk_sys),
 	.HPS_BUS(HPS_BUS),
@@ -263,9 +260,6 @@ hps_io #(.STRLEN($size(CONF_STR)>>3), .VDNUM(2)) hps_io
 	.buttons(buttons),
 	.status(status),
 
-	.img_mounted(img_mounted),
-	
-	.sd_req_type(sd_req_type),
 	.sd_lba(sd_lba),
 	.sd_rd(sd_rd),
 	.sd_wr(sd_wr),
@@ -471,11 +465,8 @@ dataController_top dc0
 
 	.diskMotor(diskMotor),
 	.diskAct(diskAct),
-
-	.img_mounted(img_mounted),
 	
 	// block device interface for scsi disk
-	.io_req_type(sd_req_type),
 	.io_lba(sd_lba),
 	.io_rd(sd_rd),
 	.io_wr(sd_wr),

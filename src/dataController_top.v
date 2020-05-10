@@ -67,13 +67,10 @@ module dataController_top(
 	input dskReadAckExt,
 
 	// connections to io controller
-	input   [1:0] img_mounted,
-	
-	output [15:0] io_req_type,
-   output [31:0] io_lba,
-   output  [1:0] io_rd,
-   output  [1:0] io_wr,
-   input 	     io_ack,
+	output [31:0] io_lba,
+	output 	     io_rd,
+	output 	     io_wr,
+	input 	     io_ack,
 
 	input   [8:0] sd_buff_addr,
 	input   [7:0] sd_buff_dout,
@@ -164,9 +161,6 @@ ncr5380 scsi
 	.rdata(scsiDataOut),
 
 	// connections to io controller
-	.img_mounted( img_mounted ),
-	
-	.io_req_type( io_req_type ),
 	.io_lba ( io_lba ),
 	.io_rd ( io_rd ),
 	.io_wr ( io_wr ),
