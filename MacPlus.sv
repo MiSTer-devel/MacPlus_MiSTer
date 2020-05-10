@@ -291,7 +291,7 @@ wire        cpu_clkena = cep && (cpuBusControl || (cpu_busstate == 2'b01));
 reg  [15:0] cpuDataIn;
 always @(posedge clk_sys) if(cel && cpuBusControl && ~cpu_busstate[0] && _cpuRW) cpuDataIn <= dataControllerDataOut;
 
-TG68KdotC_Kernel #(0,0,0,0,0,0) m68k
+TG68KdotC_Kernel #(0,0,0,0,0,0, 0,1) m68k
 (
 	.clk            ( clk_sys        ),
 	.nReset         ( _cpuReset      ),
@@ -302,7 +302,7 @@ TG68KdotC_Kernel #(0,0,0,0,0,0) m68k
 	.berr           ( 1'b0           ),
 	.clr_berr       ( 1'b0           ),
 	.CPU            ( 2'b00          ),   // 00=68000
-	.addr           ( {cpuAddrHi, cpuAddr} ),
+	.addr_out       ( {cpuAddrHi, cpuAddr} ),
 	.data_write     ( cpuDataOut     ),
 	.nUDS           ( _cpuUDS        ),
 	.nLDS           ( _cpuLDS        ),
