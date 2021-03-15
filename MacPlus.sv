@@ -314,13 +314,6 @@ wire [21:1] dio_a =
 
 
 
-
-// keys and switches are dummies as the mist doesn't have any ...
-wire [9:0] sw = 10'd0;
-wire [3:0] key = 4'd0;
-
-
-
 	//assign SDRAM_CLK = clk64;
 	// the configuration string is returned to the io controller to allow
 	// it to control the menu on the OSD

@@ -60,7 +60,7 @@ reg   [8:0] yoe; // year of era
 reg  [10:0] doy; // day of year
 reg  [20:0] doe; // day of era
 reg  [23:0] days;
-/*
+
 always @(*) begin
 	//    Days from epoch (01/01/1904)
 	//    y -= m <= 2;
@@ -74,7 +74,7 @@ always @(*) begin
 	doe = yoe * 9'd365 + yoe/4 - yoe/100 + doy;
 	days = 5 * 146097 + doe - 719468 + 24107;
 end
-*/
+
 always @(posedge clk) begin
 	if (reset) begin
 		bit_cnt <= 0;
