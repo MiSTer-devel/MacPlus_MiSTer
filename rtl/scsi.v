@@ -24,11 +24,13 @@ module scsi
 	input   [7:0] din, // data from initiator to target
 	output  [7:0] dout, // data from target to initiator
 
-	// interface to io controller 
+	// interface to io controller
+	input         img_mounted,
+	input  [23:0] img_blocks,
 	output [31:0] io_lba,
 	output reg 	  io_rd,
 	output reg 	  io_wr,
-	input 	     io_ack,
+	input         io_ack,
 
 	input      [8:0] sd_buff_addr,
 	input      [7:0] sd_buff_dout,
@@ -38,7 +40,7 @@ module scsi
 
    
 // SCSI device id
-parameter ID = 0; 
+parameter [7:0] ID = 0; 
 
 `define PHASE_IDLE        3'd0
 `define PHASE_CMD_IN      3'd1
@@ -104,11 +106,17 @@ wire [7:0] inquiry_dout =
 
 		(data_cnt == 32'd26)?"S":(data_cnt == 32'd27)?"T":
 		(data_cnt == 32'd28)?"2":(data_cnt == 32'd29)?"2":
-		(data_cnt == 32'd30)?"5":(data_cnt == 32'd31)?"N":
+		(data_cnt == 32'd30)?"5":(data_cnt == 32'd31)?"N" + ID:	// TESTING. ElectronAsh.
 		8'h00;
 
 // output of read capacity command
-wire [31:0] capacity = 32'd41056;   // 40960 + 96 blocks = 20MB
+//wire [31:0] capacity = 32'd41056;   // 40960 + 96 blocks = 20MB
+//wire [31:0] capacity = 32'd1024096;   // 1024000 + 96 blocks = 500MB
+reg [31:0] capacity;
+always @(posedge clk) begin
+	if (img_mounted) capacity <= img_blocks + 8'd96;
+end
+
 wire [31:0] capacity_m1 = capacity - 32'd1;
 wire [7:0] read_capacity_dout =
 		(data_cnt == 32'd0 )?capacity_m1[31:24]:
@@ -169,8 +177,8 @@ always @(posedge clk) begin
 	reg old_ack;
 	
 	old_ack <= ack;
-	stb_ack <= (~old_ack & ack);
-	stb_adv <= stb_ack;
+	stb_ack <= (~old_ack & ack); // on rising edge
+	stb_adv <= (old_ack & ~ack); // on falling edge
 end
 
 // store data on rising edge of ack, ...
@@ -254,10 +262,13 @@ wire       cmd_mode_select = (op_code == 8'h15);
 wire       cmd_mode_sense = (op_code == 8'h1a);
 wire       cmd_test_unit_ready = (op_code == 8'h00);
 wire       cmd_read_capacity = (op_code == 8'h25);
+wire       cmd_read_buffer = (op_code == 8'h3b);  // fake
+wire       cmd_write_buffer = (op_code == 8'h3c); // fake
 
 // valid command in buffer? TODO: check for valid command parameters
 wire  cmd_ok = cmd_read || cmd_write || cmd_inquiry || cmd_test_unit_ready || 
-		  cmd_read_capacity || cmd_mode_select || cmd_format || cmd_mode_sense;
+		  cmd_read_capacity || cmd_mode_select || cmd_format || cmd_mode_sense ||
+		  cmd_read_buffer | cmd_write_buffer;
 
 // latch parameters once command is complete
 reg [31:0] lba;
@@ -302,9 +313,9 @@ always @(posedge clk) begin
 					// continue according to command
 
 					// these commands return data
-					if(cmd_read || cmd_inquiry || cmd_read_capacity || cmd_mode_sense) phase <= `PHASE_DATA_OUT;
+					if(cmd_read || cmd_inquiry || cmd_read_capacity || cmd_mode_sense || cmd_read_buffer) phase <= `PHASE_DATA_OUT;
 					// these commands receive dataa
-					else if(cmd_write || cmd_mode_select) phase <= `PHASE_DATA_IN;
+					else if(cmd_write || cmd_mode_select || cmd_write_buffer) phase <= `PHASE_DATA_IN;
 					// and all other valid commands are just "ok"
 					else phase <= `PHASE_STATUS_OUT;
 				end else begin
