@@ -45,6 +45,7 @@ module addrController_top(
 	output _hblank,
 	output _vblank,
 	output loadPixels,
+	input  vid_alt,
 		
 	input  snd_alt,
 	output loadSound,
@@ -202,6 +203,7 @@ module addrController_top(
 		.clk(clk),
 		.clk_en(clk8_en_p),
 		.busCycle(busCycle), 
+		.vid_alt(vid_alt),
 		.videoAddr(videoAddr), 
 		.hsync(hsync), 
 		.vsync(vsync), 

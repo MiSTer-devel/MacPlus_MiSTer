@@ -407,7 +407,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3),.PS2DIV(1000), .VDNUM(2),.PS2WE(0)) hps_io
 				  
 	// interconnects
 	// CPU
-	wire clk8, _cpuReset, _cpuUDS, _cpuLDS, _cpuRW, _cpuAS;
+	wire clk8, _cpuReset, _cpuReset_o, _cpuUDS, _cpuLDS, _cpuRW, _cpuAS;
 	wire clk8_en_p, clk8_en_n;
 	wire clk16_en_p, clk16_en_n;
 	wire _cpuVMA, _cpuVPA, _cpuDTACK;
@@ -430,7 +430,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3),.PS2DIV(1000), .VDNUM(2),.PS2WE(0)) hps_io
 	wire memoryLatch;
 	
 	// peripherals
-	wire loadPixels, pixelOut, _hblank, _vblank, hsync, vsync;
+	wire vid_alt, loadPixels, pixelOut, _hblank, _vblank, hsync, vsync;
 	wire memoryOverlayOn, selectSCSI, selectSCC, selectIWM, selectVIA, selectRAM, selectROM;
 	wire [15:0] dataControllerDataOut;
 	
@@ -464,6 +464,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3),.PS2DIV(1000), .VDNUM(2),.PS2WE(0)) hps_io
 	wire        cpu_en_n      = status_turbo ? clk16_en_n : clk8_en_n;
 
 	wire        is68000       = status_cpu == 0;
+	assign      _cpuReset_o   = is68000 ? fx68_reset_n : tg68_reset_n;
 	assign      _cpuRW        = is68000 ? fx68_rw : tg68_rw;
 	assign      _cpuAS        = is68000 ? fx68_as_n : tg68_as_n;
 	assign      _cpuUDS       = is68000 ? fx68_uds_n : tg68_uds_n;
@@ -489,6 +490,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3),.PS2DIV(1000), .VDNUM(2),.PS2WE(0)) hps_io
 	wire        fx68_fc2;
 	wire [15:0] fx68_dout;
 	wire [23:1] fx68_a;
+	wire        fx68_reset_n;
 
 	fx68k fx68k (
 		.clk        ( clk32 ),
@@ -510,7 +512,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3),.PS2DIV(1000), .VDNUM(2),.PS2WE(0)) hps_io
 		.FC1        ( fx68_fc1 ),
 		.FC2        ( fx68_fc2 ),
 		.BGn        ( ),
-		.oRESETn    ( ),
+		.oRESETn    ( fx68_reset_n ),
 		.oHALTEDn   ( ),
 		.DTACKn     ( _cpuDTACK ),
 		.VPAn       ( _cpuVPA ),
@@ -538,6 +540,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3),.PS2DIV(1000), .VDNUM(2),.PS2WE(0)) hps_io
 	wire        tg68_fc2;
 	wire [15:0] tg68_dout;
 	wire [31:0] tg68_a;
+	wire        tg68_reset_n;
 
 	tg68k tg68k (
 		.clk        ( clk32      ),
@@ -552,7 +555,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3),.PS2DIV(1000), .VDNUM(2),.PS2WE(0)) hps_io
 		.uds_n      ( tg68_uds_n ),
 		.lds_n      ( tg68_lds_n ),
 		.fc         ( { tg68_fc2, tg68_fc1, tg68_fc0 } ),
-		.reset_n    (  ),
+		.reset_n    ( tg68_reset_n ),
 
 		.E          (  ),
 		.E_div      ( status_turbo ),
@@ -608,6 +611,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3),.PS2DIV(1000), .VDNUM(2),.PS2WE(0)) hps_io
 		._hblank(_hblank),
 		._vblank(_vblank),
 		.loadPixels(loadPixels),
+		.vid_alt(vid_alt),
 		.memoryOverlayOn(memoryOverlayOn),
 
 		.snd_alt(snd_alt),
@@ -635,7 +639,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3),.PS2DIV(1000), .VDNUM(2),.PS2WE(0)) hps_io
 	
 			// various sources can reset the mac
 			if(!pll_locked || status_reset || buttons[1] || 
-				rom_download || (last_mem_config != status_mem) || (last_cpu_config != status_cpu)) 
+				rom_download || (last_mem_config != status_mem) || (last_cpu_config != status_cpu) || !_cpuReset_o)
 				rst_cnt <= 16'd65535;
 			else if(rst_cnt != 0)
 				rst_cnt <= rst_cnt - 16'd1;
@@ -684,6 +688,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3),.PS2DIV(1000), .VDNUM(2),.PS2WE(0)) hps_io
 		._vblank(_vblank), 
 		.pixelOut(pixelOut),
 		.loadPixels(loadPixels),
+		.vid_alt(vid_alt),
 
 		.memoryOverlayOn(memoryOverlayOn),
 

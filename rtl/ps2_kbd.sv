@@ -19,7 +19,7 @@ module ps2_kbd(	input			sysclk,
 
 	reg [8:0] 		keymac;
 	reg			key_pending;
-	reg [21:0] 		pacetimer;
+	reg [19:0] pacetimer;
 	reg			inquiry_active;
 	reg 			extended;
 	reg 			keybreak;
@@ -227,8 +227,8 @@ module ps2_kbd(	input			sysclk,
 		  else if (!tick_long)
 		    pacetimer <= pacetimer + 1'd1;
 	  end
-	assign tick_long  = pacetimer == 22'h3fffff;
-	assign tick_short = pacetimer == 22'h000fff;
+	assign tick_long  = pacetimer == 20'hfffff;
+	assign tick_short = pacetimer == 20'h00fff;
 
 	/* Delay inquiry responses to after tick_short */
 	always@(posedge sysclk or posedge reset)
@@ -241,7 +241,7 @@ module ps2_kbd(	input			sysclk,
 		    inquiry_active <= cmd_inquiry;		  
 	  end	
 
-	/* Key answer to the mac XXX FIXME: keypad */
+	/* Key answer to the mac */
 	assign pop_key = (cmd_instant & tick_short) |
 			 (inquiry_active & tick_long) |
 			 (inquiry_active & key_pending);
@@ -260,7 +260,7 @@ module ps2_kbd(	input			sysclk,
 			if (cmd_model | cmd_test)
 				key_pending <= 0;
 			else if (pop_key) begin
-				if (keymac[8] & !keypad_byte2)
+				if (key_pending & keymac[8] & !keypad_byte2)
 					keypad_byte2 <= 1;
 				else begin
 					key_pending <= 0;
