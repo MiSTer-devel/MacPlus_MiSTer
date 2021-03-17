@@ -14,7 +14,9 @@ module ps2_kbd(	input			sysclk,
 		input strobe_out,
 
 		output [7:0] data_in,
-		output strobe_in
+		output strobe_in,
+		
+		output reg capslock
 );
 
 	reg [8:0] 		keymac;
@@ -23,7 +25,7 @@ module ps2_kbd(	input			sysclk,
 	reg			inquiry_active;
 	reg 			extended;
 	reg 			keybreak;
-	reg			capslock;
+	//reg			capslock;
 	reg			haskey;
 	wire 			got_key;
 	wire 			got_break;

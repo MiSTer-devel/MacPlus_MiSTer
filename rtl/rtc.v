@@ -5,6 +5,7 @@ module rtc (
 	input         reset,
 
 	input  [63:0] rtc, // sec, min, hour, date, month, year, day (BCD)
+	input [32:0] timestamp, // unix timestamp
 	input         _cs,
 	input         ck,
 	input         dat_i,
@@ -18,6 +19,7 @@ function [7:0] bcd2bin;
 	end
 endfunction
 
+
 reg   [2:0] bit_cnt;
 reg         ck_d;
 reg   [7:0] din;
@@ -26,6 +28,7 @@ reg   [7:0] dout;
 reg         cmd_mode;
 reg         receiving;
 reg  [31:0] secs;
+reg  [31:0] secs2;
 reg   [7:0] ram[20];
 
 initial begin
@@ -51,6 +54,8 @@ initial begin
 	ram[5'h13] = 8'h6C;
 end
 
+`ifdef notdefined
+
 integer     sec_cnt;
 
 wire  [7:0] year =  bcd2bin(rtc[47:40]);
@@ -61,6 +66,7 @@ reg  [10:0] doy; // day of year
 reg  [20:0] doe; // day of era
 reg  [23:0] days;
 
+
 always @(*) begin
 	//    Days from epoch (01/01/1904)
 	//    y -= m <= 2;
@@ -69,11 +75,17 @@ always @(*) begin
 	//    const unsigned doy = (153*(m + (m > 2 ? -3 : 9)) + 2)/5 + d-1;  // [0, 365]
 	//    const unsigned doe = yoe * 365 + yoe/4 - yoe/100 + doy;         // [0, 146096]
 	//    return era * 146097 + static_cast<Int>(doe) - 719468;
+	
+	
 	yoe = (month <= 2) ? year - 1'd1 : year;
 	doy = (8'd153*(month + ((month > 2) ? -3 : 9)) + 4'd2)/4'd5 + day-1'd1;
 	doe = yoe * 9'd365 + yoe/4 - yoe/100 + doy;
 	days = 5 * 146097 + doe - 719468 + 24107;
+
 end
+
+`endif
+
 
 always @(posedge clk) begin
 	if (reset) begin
@@ -81,7 +93,7 @@ always @(posedge clk) begin
 		receiving <= 1;
 		cmd_mode <= 1;
 		dat_o <= 1;
-		sec_cnt <= 0;
+	//	sec_cnt <= 0;
 	end 
 	else begin
 
@@ -91,10 +103,14 @@ always @(posedge clk) begin
 //			secs <= secs + 1'd1;
 //		end
 
+	secs <= timestamp + 2082844800; // difference between unix epoch and mac epoch
+
+`ifdef notdefined
 		secs <= bcd2bin(rtc[7:0]) +
 		        bcd2bin(rtc[15:8]) * 60 +
 		        bcd2bin(rtc[23:16]) * 3600 +
 	          days * 3600*24;
+`endif
 
 		if (_cs) begin
 			bit_cnt <= 0;

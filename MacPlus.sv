@@ -333,7 +333,6 @@ wire [21:1] dio_a =
 	wire mouseData;
 	wire keyClk;
 	wire keyData;
-	wire [63:0] rtc;
 
 	wire [31:0] io_lba;
 	wire [1:0] io_rd;
@@ -347,9 +346,10 @@ wire [21:1] dio_a =
 	wire [7:0] sd_buff_din;
 	wire ioctl_wait;
 
+	wire capslock;
 	
 wire [63:0] RTC;
-
+wire [32:0] TIMESTAMP;
 
 
 hps_io #(.STRLEN($size(CONF_STR)>>3),.PS2DIV(1000), .VDNUM(2),.PS2WE(0)) hps_io
@@ -384,12 +384,13 @@ hps_io #(.STRLEN($size(CONF_STR)>>3),.PS2DIV(1000), .VDNUM(2),.PS2WE(0)) hps_io
 
 	.ioctl_wait(ioctl_wait),
 
-	.ps2_key(ps2_key),
+	//.ps2_key(ps2_key),
 	.ps2_kbd_led_use(3'b001),
 	.ps2_kbd_led_status({2'b00, capslock}),
 	.RTC(RTC),
+	.TIMESTAMP(TIMESTAMP),
 
-	.ps2_mouse(ps2_mouse),
+	//.ps2_mouse(ps2_mouse),
 		.ps2_kbd_clk_out    ( keyClk         ),
 		.ps2_kbd_data_out   ( keyData        ),
 		.ps2_mouse_clk_out  ( mouseClk       ),
@@ -678,11 +679,13 @@ hps_io #(.STRLEN($size(CONF_STR)>>3),.PS2DIV(1000), .VDNUM(2),.PS2WE(0)) hps_io
 		// peripherals
 		.keyClk(keyClk), 
 		.keyData(keyData), 
+		.capslock(capslock),
 		.mouseClk(mouseClk),
 		.mouseData(mouseData),
 		.serialIn(serialIn),
-		.rtc(rtc),
-
+		.rtc(RTC),
+		.timestamp(TIMESTAMP),
+		
 		// video
 		._hblank(_hblank),
 		._vblank(_vblank), 
@@ -803,7 +806,7 @@ sdram sdram (
 
 	// system interface
 	.clk         ( clk64                    ),
-	.sync          ( clk8                     ),
+	.sync          ( clk8                     ), // cpu_en_p?
 	//.clk_64         ( clk64                    ),
 	//.clk_8          ( clk8                     ),
 	.init           ( !pll_locked              ),
@@ -817,6 +820,40 @@ sdram sdram (
 	.oe             ( sdram_oe                 ),
 	.dout           ( sdram_out                )
 );
+
+
+/*
+
+assign SDRAM_CKE         = 1'b1;
+	assign SDRAM_CLK = clk64;
+
+sdram sdram (
+	//.sd_clk  ( SDRAM_CLK   ),
+	// interface to the MT48LC16M16 chip
+	.sd_data        ( SDRAM_DQ                 ),
+	.sd_addr        ( SDRAM_A                  ),
+	.sd_dqm         ( {SDRAM_DQMH, SDRAM_DQML} ),
+	.sd_cs          ( SDRAM_nCS                ),
+	.sd_ba          ( SDRAM_BA                 ),
+	.sd_we          ( SDRAM_nWE                ),
+	.sd_ras         ( SDRAM_nRAS               ),
+	.sd_cas         ( SDRAM_nCAS               ),
+
+	// system interface
+	.clk_64         ( clk64                    ),
+	.clk_8          ( clk8                     ),
+	.init           ( !pll_locked              ),
+
+	// cpu/chipset interface
+	// map rom to sdram word address $200000 - $20ffff
+	.din            ( sdram_din                ),
+	.addr           ( sdram_addr               ),
+	.ds             ( sdram_ds                 ),
+	.we             ( sdram_we                 ),
+	.oe             ( sdram_oe                 ),
+	.dout           ( sdram_out                )
+);
+*/
 
 endmodule
 

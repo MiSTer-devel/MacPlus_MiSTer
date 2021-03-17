@@ -40,7 +40,7 @@ module dataController_top(
 	// keyboard:
 	input keyClk, 
 	input keyData, 
-	 
+	output capslock, 
 	// mouse:
 	input mouseClk, 
 	input mouseData,
@@ -51,7 +51,8 @@ module dataController_top(
 
 	// RTC
 	input [63:0] rtc,
-
+	input [32:0] timestamp,
+	
 	// video:
 	output pixelOut,	
 	input _hblank,
@@ -277,6 +278,7 @@ module dataController_top(
 		.clk        (clk32),
 		.reset      (!_cpuReset),
 		.rtc        (rtc),
+		.timestamp  (timestamp),
 		._cs        (_rtccs),
 		.ck         (rtcck),
 		.dat_i      (rtcdat_i),
@@ -448,6 +450,8 @@ module dataController_top(
 		.data_out(kbd_out_data),              // data from mac
 		.strobe_out(kbd_out_strobe),
 		.data_in(kbd_in_data),         // data to mac
-		.strobe_in(kbd_in_strobe));
+		.strobe_in(kbd_in_strobe),
+		.capslock(capslock)
+		);
 		
 endmodule
