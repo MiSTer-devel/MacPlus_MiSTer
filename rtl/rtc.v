@@ -87,6 +87,9 @@ end
 `endif
 
 
+reg [24:0] clocktoseconds;
+ 
+
 always @(posedge clk) begin
 	if (reset) begin
 		bit_cnt <= 0;
@@ -103,7 +106,17 @@ always @(posedge clk) begin
 //			secs <= secs + 1'd1;
 //		end
 
-	secs <= timestamp + 2082844800; // difference between unix epoch and mac epoch
+	// timestamp is only sent at core load
+	if (secs==0)
+			secs <= timestamp + 2082844800; // difference between unix epoch and mac epoch
+
+	// we need to add one to the seconds
+   clocktoseconds<= clocktoseconds +1;
+	if (32000000==clocktoseconds) // every 32mhz we increment secs by one
+	begin
+		clocktoseconds<=0;
+		secs<=secs+1;
+	end
 
 `ifdef notdefined
 		secs <= bcd2bin(rtc[7:0]) +
