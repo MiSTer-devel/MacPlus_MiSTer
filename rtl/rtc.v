@@ -112,7 +112,7 @@ always @(posedge clk) begin
 
 	// we need to add one to the seconds
    clocktoseconds<= clocktoseconds +1;
-	if (32000000==clocktoseconds) // every 32mhz we increment secs by one
+	if (31999999==clocktoseconds) // every 32mhz we increment secs by one
 	begin
 		clocktoseconds<=0;
 		secs<=secs+1;
