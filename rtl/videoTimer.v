@@ -11,8 +11,10 @@ module videoTimer(
 	output _vblank,
 	output loadPixels
 );
-/*
+`define mist_video 1
+
 //mist version
+`ifdef mist_video
 	// timing data from http://tinyvga.com/vga-timing/1024x768@60Hz
 	localparam 	kVisibleWidth = 128, // (1024/2)/4
 					kTotalWidth = 168, // (1344/2)/4
@@ -24,17 +26,18 @@ module videoTimer(
 					kVsyncStart = 771,
 					kVsyncEnd = 776,
 					kPixelLatency = 1; // number of clk8 cycles from xpos==0 to when pixel data actually exits the video shift register
-*/
+`else
 localparam 	kVisibleWidth = 128,
-				kTotalWidth = 176,
+				kTotalWidth = 168,
 				kVisibleHeightStart = 21,
 				kVisibleHeightEnd = 362,
 				kTotalHeight = 370,
-				kHsyncStart = 135,
-				kHsyncEnd = 152,
+				kHsyncStart = 131,
+				kHsyncEnd = 147,
 				kVsyncStart = 365,
 				kVsyncEnd = 369,
 				kPixelLatency = 1; // number of clk8 cycles from xpos==0 to when pixel data actually exits the video shift register
+`endif
 
 	// use screen buffer address for a 4MB RAM layout-- it will wrap
 	// around to the proper address for 1MB, 512K, and 128K layouts
@@ -75,7 +78,7 @@ localparam 	kVisibleWidth = 128,
 		end
 	end
 
-	assign _hblank = ~(xpos >= kVisibleWidth);
+	assign _hblank = ~(xpos >= kVisibleWidth+kPixelLatency);
 	assign _vblank = ~(ypos < kVisibleHeightStart || ypos > kVisibleHeightEnd);
 	
 	// The 0,0 address actually starts below kScreenBufferBase, because the Mac screen buffer is
@@ -83,9 +86,15 @@ localparam 	kVisibleWidth = 128,
 	// kVisibleHeightStart divided by 2 to account for vertical pixel doubling.
 	// kVisibleWidth divided by 2 because it's the 8MHz visible width times 4 to get actual number of pixels, 
 	// 	then divided by 8 bits per byte	
+`ifdef mist_video
+	assign videoAddr = kScreenBufferBase - (vid_alt ? 16'h0 : 16'h8000) -
+							 (kVisibleHeightStart/2 * kVisibleWidth/2) +
+							 { ypos[9:1], xpos[6:2], 1'b0 };	
+`else
 	assign videoAddr = kScreenBufferBase -  (vid_alt ? 16'h0 : 16'h8000) -
 							 (kVisibleHeightStart * kVisibleWidth/2) +
 							 { ypos[8:0], xpos[6:2], 1'b0 };
+`endif
 	
 	assign loadPixels = _vblank == 1'b1 && _hblank == 1'b1 && busCycle == 2'b00;
 	
