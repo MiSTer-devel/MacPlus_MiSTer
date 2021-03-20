@@ -206,30 +206,27 @@ localparam CONF_STR = {
 	"F1,DSK,Mount Pri Floppy;",
 	"F2,DSK,Mount Sec Floppy;",
 	"-;",
-	"S0,IMGVHD,Mount SCSI6;",
-	"S1,IMGVHD,Mount SCSI2;",
+	"S0,IMGVHD,Mount SCSI-6;",
+	"S1,IMGVHD,Mount SCSI-2;",
 	"-;",
 	"O78,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"OBC,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
 	"-;",
-	"O4,Memory,1MB,4MB;",
 	"O5,Speed,8MHz,16MHz;",
-	"ODE,CPU,FX68K-68000,TG68K-68010,TG68K-68020;",
+	"ODE,CPU,68000,68010,68020;",
+	"O4,Memory,1MB,4MB;",
 	"-;",
-	"R0,Reset;",
+	"R0,Reset & Apply CPU+Memory;",
 	"V,v",`BUILD_DATE
 };
 
-wire       status_mem   = status[4];
-wire       status_turbo = status[5];
-wire [1:0] status_cpu   = status[14:13];
-wire       status_reset = status[0];
+wire status_turbo = status[5];
 
 ////////////////////   CLOCKS   ///////////////////
 
 wire clk_sys, clk_mem;
 wire pll_locked;
-		
+
 pll pll
 (
 	.refclk(CLK_50M),
@@ -238,24 +235,22 @@ pll pll
 	.locked(pll_locked)
 );
 
-reg n_reset = 0;
-reg last_mem_config;
-reg [1:0] last_cpu_config;
+reg       status_mem;
+reg [1:0] status_cpu;
+reg       n_reset = 0;
 always @(posedge clk_sys) begin
 	reg [15:0] rst_cnt;
 
 	if (clk8_en_p) begin
-		last_mem_config <= status_mem;
-		last_cpu_config <= status_cpu;
-
 		// various sources can reset the mac
-		if(!pll_locked || status_reset || buttons[1] || RESET ||
-			(last_mem_config != status_mem) || (last_cpu_config != status_cpu) || !_cpuReset_o) begin
+		if(~pll_locked || status[0] || buttons[1] || RESET || ~_cpuReset_o) begin
 			rst_cnt <= '1;
 			n_reset <= 0;
 		end
 		else if(rst_cnt) begin
-			rst_cnt <= rst_cnt - 1'd1;
+			rst_cnt    <= rst_cnt - 1'd1;
+			status_mem <= status[4];
+			status_cpu <= status[14:13];
 		end
 		else begin
 			n_reset <= 1;
