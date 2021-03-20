@@ -71,9 +71,9 @@ module ncr5380
 	output  [1:0] io_wr,
 	input 	     io_ack,
 
-	input   [8:0] sd_buff_addr,
-	input   [7:0] sd_buff_dout,
-	output  [7:0] sd_buff_din,
+	input   [7:0] sd_buff_addr,
+	input  [15:0] sd_buff_dout,
+	output [15:0] sd_buff_din,
 	input         sd_buff_wr
 );
 
@@ -287,7 +287,7 @@ module ncr5380
 	wire [7:0] scsi2_dout;
 
 	wire [31:0] io_lba_2;
-	wire [7:0] sd_buff_din_2;
+	wire [15:0] sd_buff_din_2;
 
 	// connect a target
 	scsi #(.ID(2)) scsi2
@@ -329,7 +329,7 @@ module ncr5380
 	wire [7:0] scsi6_dout;
 	
 	wire [31:0] io_lba_6;
-	wire [7:0] sd_buff_din_6;
+	wire [15:0] sd_buff_din_6;
 
 	scsi #(.ID(6)) scsi6
 	(

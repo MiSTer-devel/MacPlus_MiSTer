@@ -32,10 +32,10 @@ module scsi
 	output reg 	  io_wr,
 	input         io_ack,
 
-	input      [8:0] sd_buff_addr,
-	input      [7:0] sd_buff_dout,
-	output reg [7:0] sd_buff_din,
-	input            sd_buff_wr
+	input       [7:0] sd_buff_addr,
+	input      [15:0] sd_buff_dout,
+	output reg [15:0] sd_buff_din,
+	input             sd_buff_wr
 );
 
    
@@ -52,13 +52,19 @@ reg [2:0]  phase;
 
 // ---------------- buffer read engine -----------------------
 // the buffer itself. Can hold one sector
-reg [7:0] buffer_out [512];
-always @(posedge clk) sd_buff_din <= buffer_out[sd_buff_addr];
+reg [7:0] buffer_out0 [256];
+always @(posedge clk) sd_buff_din[7:0] <= buffer_out0[sd_buff_addr];
+
+reg [7:0] buffer_out1 [256];
+always @(posedge clk) sd_buff_din[15:8] <= buffer_out1[sd_buff_addr];
 
 // ---------------- buffer write engine ----------------------
 // the buffer itself. Can hold one sector
-reg [7:0] buffer_in [512];
-always @(posedge clk) if(sd_buff_wr) buffer_in[sd_buff_addr] <= sd_buff_dout;
+reg [7:0] buffer_in0 [256];
+always @(posedge clk) if(sd_buff_wr) buffer_in0[sd_buff_addr] <= sd_buff_dout[7:0];
+
+reg [7:0] buffer_in1 [256];
+always @(posedge clk) if(sd_buff_wr) buffer_in1[sd_buff_addr] <= sd_buff_dout[15:8];
 
 // -----------------------------------------------------------
 
@@ -136,7 +142,7 @@ wire [7:0] mode_sense_dout =
 
 // clock data out of buffer to allow for embedded ram
 reg [7:0] buffer_dout;
-always @(posedge clk) buffer_dout <= buffer_in[data_cnt];
+always @(posedge clk) buffer_dout <= data_cnt[0] ? buffer_in1[data_cnt[8:1]] : buffer_in0[data_cnt[8:1]];
 
 // buffer to store incoming commands
 reg [3:0]  cmd_cnt;
@@ -185,7 +191,10 @@ end
 always @(posedge clk) begin
 	if(stb_ack) begin
 		if(phase == `PHASE_CMD_IN)  cmd[cmd_cnt] <= din;
-		if(phase == `PHASE_DATA_IN) buffer_out[data_cnt] <= din;
+		if(phase == `PHASE_DATA_IN) begin
+			if(data_cnt[0]) buffer_out1[data_cnt[8:1]] <= din;
+			else            buffer_out0[data_cnt[8:1]] <= din;
+		end
 	end
 end
 

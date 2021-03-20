@@ -83,9 +83,9 @@ module dataController_top(
 	output  [1:0] io_rd,
 	output  [1:0] io_wr,
 	input         io_ack,
-	input   [8:0] sd_buff_addr,
-	input   [7:0] sd_buff_dout,
-	output  [7:0] sd_buff_din,
+	input   [7:0] sd_buff_addr,
+	input  [15:0] sd_buff_dout,
+	output [15:0] sd_buff_din,
 	input         sd_buff_wr
 );
 	

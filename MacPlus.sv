@@ -272,9 +272,9 @@ wire [31:0] sd_lba;
 wire  [1:0] sd_rd;
 wire  [1:0] sd_wr;
 wire        sd_ack;
-wire  [8:0] sd_buff_addr;
-wire  [7:0] sd_buff_dout;
-wire  [7:0] sd_buff_din;
+wire  [7:0] sd_buff_addr;
+wire [15:0] sd_buff_dout;
+wire [15:0] sd_buff_din;
 wire        sd_buff_wr;
 wire  [1:0] img_mounted;
 wire [31:0] img_size;
@@ -287,11 +287,11 @@ wire [24:0] ps2_mouse;
 wire        capslock;
 
 wire [24:0] ioctl_addr;
-wire  [7:0] ioctl_data;
+wire [15:0] ioctl_data;
 
 wire [32:0] TIMESTAMP;
 
-hps_io #(.STRLEN($size(CONF_STR)>>3), .VDNUM(2)) hps_io
+hps_io #(.STRLEN($size(CONF_STR)>>3), .VDNUM(2), .WIDE(1)) hps_io
 (
 	.clk_sys(clk_sys),
 	.HPS_BUS(HPS_BUS),
@@ -346,7 +346,7 @@ assign VGA_SL = 0;
 wire [10:0] audio;
 assign AUDIO_L = {audio[10:0], 5'b00000};
 assign AUDIO_R = {audio[10:0], 5'b00000};
-assign AUDIO_S = 0;
+assign AUDIO_S = 1;
 assign AUDIO_MIX = 0;
 
 
@@ -731,16 +731,12 @@ reg [15:0] dio_data;
 reg        dio_write;
 
 always @(posedge clk_sys) begin
-	reg [7:0] temp;
 	reg old_cyc = 0;
 	
 	if(ioctl_write) begin
-		if(~ioctl_addr[0]) temp <= ioctl_data;
-		else begin
-			dio_data <= {temp, ioctl_data};
-			dio_a <= {dio_index[1:0], dio_addr[18:0]};
-			ioctl_wait <= 1;
-		end
+		dio_data <= {ioctl_data[7:0], ioctl_data[15:8]};
+		dio_a <= {dio_index[1:0], dio_addr[18:0]};
+		ioctl_wait <= 1;
 	end
 	
 	old_cyc <= dioBusControl;
