@@ -508,8 +508,8 @@ wire        tg68_reset_n;
 tg68k tg68k (
 	.clk        ( clk_sys      ),
 	.reset      ( !_cpuReset ),
-	.phi1       ( clk8_en_p  ),
-	.phi2       ( clk8_en_n  ),
+	.phi1       ( cpu_en_p  ),
+	.phi2       ( cpu_en_n  ),
 	.cpu        ( {status_cpu[1], |status_cpu} ),
 
 	.dtack_n    ( _cpuDTACK  ),
