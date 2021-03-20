@@ -1,9 +1,9 @@
 //
+// sdram.v
 //
-// sdram controller implementation for the MiST/MiSTer boards
+// sdram controller implementation for the MiST board
 // 
 // Copyright (c) 2015 Till Harbaum <till@harbaum.org> 
-// Copyright (c) 2017 Sorgelig
 // 
 // This source file is free software: you can redistribute it and/or modify 
 // it under the terms of the GNU General Public License as published 
@@ -19,36 +19,30 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>. 
 //
 
-//
-//
-// This SDRAM module provides/writes the data in 8 cycles of clock.
-// So, with 64MHz of system clock, it can emulate 8MHz asynchronous DRAM.
-//
-//
-
-module sdram
+module sdram 
 (
-	output 				sd_clk,
-	inout  reg [15:0] sd_data,    // 16 bit bidirectional data bus
-	output reg [12:0]	sd_addr,    // 13 bit multiplexed address bus
-	output     [1:0] 	sd_dqm,     // two byte masks
-	output reg [1:0] 	sd_ba,      // two banks
-	output 				sd_cs,      // a single chip select
-	output 				sd_we,      // write enable
-	output 				sd_ras,     // row address select
-	output 				sd_cas,     // columns address select
+	// interface to the MT48LC16M16 chip
+	output              sd_clk,
+	inout  reg [15:0]   sd_data,    // 16 bit bidirectional data bus
+	output reg [12:0]   sd_addr,    // 13 bit multiplexed address bus
+	output     [1:0]    sd_dqm,     // two byte masks
+	output reg [1:0]    sd_ba,      // two banks
+	output              sd_cs,      // a single chip select
+	output              sd_we,      // write enable
+	output              sd_ras,     // row address select
+	output              sd_cas,     // columns address select
 
 	// cpu/chipset interface
-	input 		 		init,			// init signal after FPGA config to initialize RAM
-	input 		 		clk,		   // sdram is accessed at 64MHz
-	input             sync,
+	input               init,       // init signal after FPGA config to initialize RAM
+	input               clk_64,     // sdram is accessed at 64MHz
+	input               clk_8,      // 8MHz chipset clock to which sdram state machine is synchonized
 
-	input      [15:0] din,			// data input from chipset/cpu
-	output reg [15:0] dout,			// data output to chipset/cpu
-	input      [23:0] addr,       // 24 bit word address
-	input       [1:0] ds,         // upper/lower data strobe
-	input 		 		oe,         // cpu/chipset requests read
-	input 		 		we          // cpu/chipset requests write
+	input [15:0]        din,        // data input from chipset/cpu
+	output reg [15:0]   dout,       // data output to chipset/cpu
+	input [23:0]        addr,       // 24 bit word address
+	input [1:0]         ds,         // upper/lower data strobe
+	input               oe,         // cpu/chipset requests read
+	input               we          // cpu/chipset requests write
 );
 
 localparam RASCAS_DELAY   = 3'd2;   // tRCD=20ns -> 3 cycles@128MHz
@@ -69,10 +63,20 @@ localparam MODE = { 3'b000, NO_WRITE_BURST, OP_MODE, CAS_LATENCY, ACCESS_TYPE, B
 // It wraps from T15 to T0 on the rising edge of clk_8
 
 localparam STATE_FIRST     = 3'd0;   // first state in cycle
-localparam STATE_CMD_START = 3'd1;   // state in which a new command can be started
-localparam STATE_CMD_CONT  = STATE_CMD_START + RASCAS_DELAY; // command can be continued
+localparam STATE_CMD_START = 3'd0;   // state in which a new command can be started
+localparam STATE_CMD_CONT  = STATE_CMD_START  + RASCAS_DELAY; // command can be continued
 localparam STATE_READ      = STATE_CMD_CONT + CAS_LATENCY + 4'd1;
+localparam STATE_LAST      = 3'd7;  // last state in cycle
 
+reg [2:0] t;
+always @(posedge clk_64) begin
+	// 128Mhz counter synchronous to 8 Mhz clock
+	// force counter to pass state 0 exactly after the rising edge of clk_8
+	if(((t == STATE_LAST)  && ( clk_8 == 0)) ||
+		((t == STATE_FIRST) && ( clk_8 == 1)) ||
+		((t != STATE_LAST) && (t != STATE_FIRST)))
+			t <= t + 3'd1;
+end
 
 // ---------------------------------------------------------------------
 // --------------------------- startup/reset ---------------------------
@@ -81,98 +85,89 @@ localparam STATE_READ      = STATE_CMD_CONT + CAS_LATENCY + 4'd1;
 // wait 1ms (32 8Mhz cycles) after FPGA config is done before going
 // into normal operation. Initialize the ram in the last 16 reset cycles (cycles 15-0)
 reg [4:0] reset;
-always @(posedge clk) begin
+always @(posedge clk_64) begin
 	if(init)	reset <= 5'h1f;
-	else if((stage == STATE_FIRST) && (reset != 0))
+	else if((t == STATE_LAST) && (reset != 0))
 		reset <= reset - 5'd1;
 end
+
+initial reset = 5'h1F;
 
 // ---------------------------------------------------------------------
 // ------------------ generate ram control signals ---------------------
 // ---------------------------------------------------------------------
 
 // all possible commands
-localparam CMD_NOP             = 3'b111;
-localparam CMD_ACTIVE          = 3'b011;
-localparam CMD_READ            = 3'b101;
-localparam CMD_WRITE           = 3'b100;
-localparam CMD_BURST_TERMINATE = 3'b110;
-localparam CMD_PRECHARGE       = 3'b010;
-localparam CMD_AUTO_REFRESH    = 3'b001;
-localparam CMD_LOAD_MODE       = 3'b000;
+localparam CMD_INHIBIT         = 4'b1111;
+localparam CMD_NOP             = 4'b0111;
+localparam CMD_ACTIVE          = 4'b0011;
+localparam CMD_READ            = 4'b0101;
+localparam CMD_WRITE           = 4'b0100;
+localparam CMD_BURST_TERMINATE = 4'b0110;
+localparam CMD_PRECHARGE       = 4'b0010;
+localparam CMD_AUTO_REFRESH    = 4'b0001;
+localparam CMD_LOAD_MODE       = 4'b0000;
 
-reg [2:0] sd_cmd;   // current command sent to sd ram
+reg [3:0] sd_cmd;   // current command sent to sd ram
 
 // drive control signals according to current command
-assign sd_cs  = 1'b0;
+assign sd_cs  = sd_cmd[3];
 assign sd_ras = sd_cmd[2];
 assign sd_cas = sd_cmd[1];
 assign sd_we  = sd_cmd[0];
 assign sd_dqm = sd_addr[12:11];
 
-reg  [1:0] mode;
-reg [15:0] din_r;
-reg  [2:0] stage;
+reg oe_latch, we_latch;
 
-always @(posedge clk) begin
-	reg [12:0] addr_r;
-	reg        old_sync;
-	
-	sd_data <= 16'hZZZZ;
-	
-	if(|stage) stage <= stage + 1'd1;
-
-	old_sync <= sync;
-	if(~old_sync & sync) stage <= 1;
-
-	sd_cmd <= CMD_NOP;  // default: idle
+always @(posedge clk_64) begin
+	sd_cmd <= CMD_INHIBIT;  // default: idle
+	sd_data <= 16'bZZZZZZZZZZZZZZZZ;
 
 	if(reset != 0) begin
 		// initialization takes place at the end of the reset phase
-		if(stage == STATE_CMD_START) begin
+		if(t == STATE_CMD_START) begin
 
 			if(reset == 13) begin
 				sd_cmd <= CMD_PRECHARGE;
 				sd_addr[10] <= 1'b1;      // precharge all banks
 			end
-				
+
 			if(reset == 2) begin
 				sd_cmd <= CMD_LOAD_MODE;
 				sd_addr <= MODE;
 			end
-			
+
 		end
-		mode    <= 0;
 	end else begin
-
 		// normal operation
-		if(stage == STATE_CMD_START) begin
-			if(we || oe) begin
 
-				mode <= {we, oe};
-
-				// RAS phase
-				sd_cmd  <= CMD_ACTIVE;
+		// RAS phase
+		// -------------------  cpu/chipset read/write ----------------------
+		if(t == STATE_CMD_START) begin
+			{oe_latch, we_latch} <= {oe, we};
+			if (we || oe) begin
+				sd_cmd <= CMD_ACTIVE;
 				sd_addr <= { 1'b0, addr[19:8] };
-				sd_ba   <= addr[21:20];
-
-				din_r   <= din;
-				addr_r  <= {we ? ~ds : 2'b00, 2'b10, addr[22], addr[7:0] };  // auto precharge
+				sd_ba <= addr[21:20];
 			end
+		// ------------------------ no access --------------------------
 			else begin
 				sd_cmd <= CMD_AUTO_REFRESH;
-				mode <= 0;
 			end
 		end
 
 		// CAS phase 
-		if(stage == STATE_CMD_CONT && mode) begin
-			sd_cmd  <= mode[1] ? CMD_WRITE : CMD_READ;
-			sd_addr <= addr_r;
-			if(mode[1]) sd_data <= din_r;
+		if(t == STATE_CMD_CONT && (we_latch || oe_latch)) begin
+			sd_cmd <= we_latch?CMD_WRITE:CMD_READ;
+			if (we_latch) sd_data <= din;
+			// always return both bytes in a read. The cpu may not
+			// need it, but the caches need to be able to store everything
+			sd_addr <= { we_latch ? ~ds : 2'b00, 2'b10, addr[22], addr[7:0] };  // auto precharge
 		end
 
-		if(stage == STATE_READ && mode[0]) dout <= sd_data;
+		// Data ready
+		if (t == STATE_READ && oe_latch) dout <= sd_data;
+
 	end
 end
 
@@ -191,7 +186,7 @@ sdramclk_ddr
 (
 	.datain_h(1'b0),
 	.datain_l(1'b1),
-	.outclock(clk),
+	.outclock(clk_64),
 	.dataout(sd_clk),
 	.aclr(1'b0),
 	.aset(1'b0),
