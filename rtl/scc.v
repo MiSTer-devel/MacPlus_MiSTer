@@ -62,7 +62,8 @@ module scc
 	wire		reset;
 
 	/* Data registers */
-	reg [7:0] 	data_a = 0;
+//	reg [7:0] 	data_a = 0;
+	wire[7:0] 	data_a ;
 	reg [7:0] 	data_b = 0;
 
 	/* Read registers */
@@ -84,6 +85,10 @@ module scc
 	reg [7:0] 	wr1_a;
 	reg [7:0] 	wr1_b;
 	reg [7:0] 	wr2;
+	reg [7:0] 	wr3_a;
+	reg [7:0] 	wr3_b;
+	reg [7:0] 	wr4_a;
+	reg [7:0] 	wr4_b;
 	reg [7:0] 	wr5_a;
 	reg [7:0] 	wr5_b;
 	reg [7:0] 	wr6_a;
@@ -125,6 +130,10 @@ module scc
 	reg		ex_irq_ip_b;
 	wire [2:0] 	rr2_vec_stat;	
 
+	reg [7:0] tx_data_a;
+	reg wr8_wr_a;
+	reg wr8_wr_b;
+		
 	/* Register/Data access helpers */
 	assign wreg_a  = cs & we & (~rs[1]) &  rs[0];
 	assign wreg_b  = cs & we & (~rs[1]) & ~rs[0];
@@ -136,11 +145,26 @@ module scc
 	/* Register index is set by a write to WR0 and reset
 	 * after any subsequent write. We ignore the side
 	 */
-	always@(posedge clk or posedge reset) begin
+	reg wr_data_a;
+	reg wr_data_b;
+	
+	reg rx_wr_a_latch;
+	always@(posedge clk /*or posedge reset*/) begin
+	
+		if (rx_wr_a) begin
+			rx_wr_a_latch<=1;
+		end
+	
+	
+		wr_data_a<=0;
+		wr_data_b<=0;
 		if (reset) begin
 		  rindex_latch <= 0;
-			data_a <= 0;
+			//data_a <= 0;
+			tx_data_a<=0;
 			data_b <= 0;
+			rx_wr_a_latch<=0;
+			wr_data_a<=0;
 		end else if (cen && cs) begin
 			if (!rs[1]) begin
 				/* Default, reset index */
@@ -156,8 +180,25 @@ module scc
 				end
 			end else begin
 				if (we) begin
-					if (rs[0]) data_a <= wdata;
-					else data_b <= wdata;
+					if (rs[0]) begin 
+						//data_a <= wdata;
+						tx_data_a <= wdata;
+						wr_data_a<=1;
+					end
+					else
+						begin
+						data_b <= wdata;
+						wr_data_b<=1;
+						end
+					end
+				else begin
+					// clear the read register?
+					if (rs[0]) begin 
+						rx_wr_a_latch<=0;
+					end
+					else begin
+					
+					end
 				end
 			end
 		end
@@ -207,6 +248,37 @@ module scc
 		  wr2 <= wdata;			
 	end
 
+	/* WR3
+	 * Reset: unchanged 
+	 */
+	always@(posedge clk or posedge reset_hw) begin
+		if (reset_hw)
+		  wr3_a <= 0;
+		else if (cen && wreg_a && rindex == 3)
+		  wr3_a <= wdata;
+	end
+	always@(posedge clk or posedge reset_hw) begin
+		if (reset_hw)
+		  wr3_b <= 0;		
+		else if (cen && wreg_b && rindex == 3)
+		  wr3_b <= wdata;
+	end
+	/* WR4
+	 * Reset: unchanged 
+	 */
+	always@(posedge clk or posedge reset_hw) begin
+		if (reset_hw)
+		  wr4_a <= 0;
+		else if (cen && wreg_a && rindex == 4)
+		  wr4_a <= wdata;
+	end
+	always@(posedge clk or posedge reset_hw) begin
+		if (reset_hw)
+		  wr4_b <= 0;		
+		else if (cen && wreg_b && rindex == 4)
+		  wr4_b <= wdata;
+	end
+
 	/* WR5
 	 * Reset: Bits 7,4,3,2,1 to 0
 	 */
@@ -231,6 +303,39 @@ module scc
 		end
 	end
 
+	/* WR8 : write data to serial port -- a or b?
+	 * 
+	 */
+	always@(posedge clk or posedge reset_hw) begin
+		if (reset_hw) begin
+			wr8_a <= 0;
+			wr8_wr_a <= 1'b0;
+		end
+		else if (cen && (rs[1] & we ) && rindex == 8) begin
+			wr8_wr_a <= 1'b1;
+			wr8_a <= wdata;			
+		end
+		else begin
+	          wr8_wr_a <= 1'b0;
+		end
+	end
+
+	always@(posedge clk or posedge reset_hw) begin
+		if (reset_hw) begin
+		  wr8_b <= 0;
+	          wr8_wr_b <= 1'b0;
+		end
+		else if (cen && (wreg_b ) && rindex == 8)
+		begin
+	          wr8_wr_b <= 1'b1;
+		  wr8_b <= wdata;			
+		end
+		else
+		begin
+	          wr8_wr_b <= 1'b0;
+		end
+	end
+	
 	/* WR9. Special: top bits are reset, handled separately, bottom
 	 * bits are only reset by a hw reset
 	 */
@@ -381,9 +486,10 @@ module scc
 			 1'b0, /* CTS */
 			 1'b0, /* Sync/Hunt */
 			 wr15_a[3] ? dcd_latch_a : dcd_a, /* DCD */
-			 1'b1, /* Tx Empty */
+			 //1'b1, /*TX EMPTY */
+			 ~tx_busy_a, /* Tx Empty */
 			 1'b0, /* Zero Count */
-			 1'b0  /* Rx Available */
+			 rx_wr_a_latch  /* Rx Available */
 			 };
 	assign rr0_b = { 1'b0, /* Break */
 			 1'b1, /* Tx Underrun/EOM */
@@ -397,9 +503,9 @@ module scc
 
 	/* RR1 */
 	assign rr1_a = { 1'b0, /* End of frame */
-			 1'b0, /* CRC/Framing error */
+			 1'b0,//frame_err_a, /* CRC/Framing error */
 			 1'b0, /* Rx Overrun error */
-			 1'b0, /* Parity error */
+			 1'b0,//parity_err_a, /* Parity error */
 			 1'b0, /* Residue code 0 */
 			 1'b1, /* Residue code 1 */
 			 1'b1, /* Residue code 2 */
@@ -483,9 +589,26 @@ module scc
 	 *
 	 * Need to add latches. Tx irq is latched when buffer goes from full->empty,
 	 * it's not a permanent state. For now keep it clear. Will have to fix that.
+	* TODO: AJS - look at tx and interrupt logic
 	 */
-	assign rx_irq_pend_a = 0;
-	assign tx_irq_pend_a = 0 /*& wr1_a[1]*/; /* Tx always empty for now */
+	 
+	 reg tx_busy_a_r;
+	 always @(posedge clk) begin
+		tx_busy_a_r <= tx_busy_a;
+	 end
+
+	 reg rx_ready_a_r;
+	 always @(posedge clk) begin
+		rx_ready_a_r <= ~wreq_n;
+	 end
+	 
+	 
+	 wire wreq_n;
+	assign rx_irq_pend_a =  rx_wr_a_latch & ( wr1_a[3] | wr1_a[4]) & wr3_a[0];	/* figure out the interrupt on / off */
+//	assign tx_irq_pend_a = 0;
+//	assign tx_irq_pend_a = tx_busy_a & wr1_a[1];
+	assign tx_irq_pend_a = (tx_busy_a_r ==1 && tx_busy_a==0) & wr1_a[1]; /* Tx always empty for now */
+//assign tx_irq_pend_a =  wr1_a[1]; /* Tx always empty for now */
 	assign ex_irq_pend_a = ex_irq_ip_a;
 	assign rx_irq_pend_b = 0;
 	assign tx_irq_pend_b = 0 /*& wr1_b[1]*/; /* Tx always empty for now */
@@ -589,8 +712,138 @@ module scc
 	end
 
 	/* NYI */
-	assign txd = 1;
-	assign rts = 1;
+//	assign txd = 1;
+//	assign rts = 1;
 
-	assign wreq = 1;	
+	/* UART */
+
+//wr_3_a
+//wr_3_b
+// bit 
+wire parity_ena_a= wr4_a[0];
+wire parity_even_a= wr4_a[1];
+reg [1:0] stop_bits_a= 2'b00;
+reg [1:0] bit_per_char_a = 2'b00;
+/*
+76543210
+data>>2 & 3
+wr4_a[3:2] 
+case(wr4_a[3:2])
+2'b00:
+// sync mode enable
+2'b01:
+// 1 stop bit
+	stop_bits_a <= 2'b0;
+2'b10:
+// 1.5 stop bit
+	stop_bits_a <= 2'b0;
+2'b11:
+// 2 stop bit
+	stop_bits_a <= 2'b1;
+default:
+	stop_bits_a <= 2'b0;
+endcase
+
+*/
+/*
+76543210
+^__ 76 
+wr_3_a[7:6]  -- bits per char
+
+                case (wr_3_a[7:6]})
+                        2'b00:  // 5
+				bit_per_char_a  <= 2'b11;
+                        2'b01:  // 7
+				bit_per_char_a  <= 2'b01;
+                        2'b10:  // 6 
+				bit_per_char_a  <= 2'b10;
+                        2'b11:  // 8
+				bit_per_char_a  <= 2'b00;
+		endcase
+*/
+/*
+300 -- 62.668800 /  =  208896
+600 -- 62.668800 /  =  104448
+1200-- 62.668800 /  =  69632
+2400 -- 62.668800 / 2400 = 26112
+4800 -- 62.668800 / 4800  = 13056
+9600 -- 62.668800 / 9600 = 6528
+1440 -- 62.668800 / 14400 = 4352
+19200 -- 62.668800 /  19200= 3264
+38400 -- 62.668800 / 28800 =  2176
+38400 -- 62.668800 / 38400 =  1632
+57600 -- 62.668800 / 57600 = 1088
+115200 -- 62.668800 / 115200 = 544
+230400 -- 62.668800 / 230400 = 272
+*/
+// case the baud rate based on wr12_a and 13_a
+// wr_12_a  -- contains the baud rate lower byte
+// wr_13_a  -- contains the baud rate high byte
+/*
+        always @(*) begin
+                case ({wr13_a,wr12_a})
+                        16'd380:  // 300 baud
+                                baud_divid_speed_a <= 24'd208896;
+                        16'd94:  // 1200 baud
+                                baud_divid_speed_a <= 24'd69632;
+                        16'd46:  // 2400 baud
+                                baud_divid_speed_a <= 24'd26112;
+                        16'd22:  // 4800 baud
+                                baud_divid_speed_a <= 24'd13056;
+                        16'd10:  // 9600 baud
+                                baud_divid_speed_a <= 24'd6528;
+                        16'd6:  // 1440 baud
+                                baud_divid_speed_a <= 24'd4352;
+                        16'd4:  // 19200 baud
+                                baud_divid_speed_a <= 24'd3264;
+                        16'd2:  // 28800 baud
+                                baud_divid_speed_a <= 24'd2176;
+                        16'd1:  // 38400 baud
+                                baud_divid_speed_a <= 24'd1632;
+                        16'd0:  // 57600 baud
+                                baud_divid_speed_a <= 24'd1088;
+                        default: 
+                                baud_divid_speed_a <= 24'd544;
+                endcase
+        end
+
+*/
+
+
+
+//reg [23:0] baud_divid_speed_a = 24'd1088;
+reg [23:0] baud_divid_speed_a = 24'd544;
+wire tx_busy_a;
+wire rx_wr_a;
+//wire [30:0] uart_setup_rx_a = { 1'b0, bit_per_char_a, 1'b0, parity_ena_a, 1'b0, parity_even_a, baud_divid_speed_a  } ;
+//wire [30:0] uart_setup_tx_a = { 1'b0, bit_per_char_a, 1'b0, parity_ena_a, 1'b0, parity_even_a, baud_divid_speed_a  } ;
+wire [30:0] uart_setup_rx_a = { 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, baud_divid_speed_a  } ;
+wire [30:0] uart_setup_tx_a = { 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, baud_divid_speed_a  } ;
+rxuart rxuart_a (
+	.i_clk(clk), 
+	.i_reset(reset_a|reset_hw), 
+	.i_setup(uart_setup_rx_a), 
+	.i_uart_rx(rxd), 
+	.o_wr(rx_wr_a), // TODO -- check on this flag
+	.o_data(data_a),   // TODO we need to save this off only if wreq is set, and mux it into data_a in the right spot
+	.o_break(break_a),
+	.o_parity_err(parity_err_a), 
+	.o_frame_err(frame_err_a), 
+	.o_ck_uart()
+	);
+txuart txuart_a
+	(
+	.i_clk(clk), 
+	.i_reset(reset_a|reset_hw), 
+	.i_setup(uart_setup_tx_a), 
+	.i_break(1'b0), 
+	.i_wr(wr_data_a),   // TODO -- we need to send data when we get the register command i guess???
+	.i_data(tx_data_a),
+	//.i_cts_n(~cts), 
+	.i_cts_n(1'b0), 
+	.o_uart_tx(txd), 
+	.o_busy(tx_busy_a)); // TODO -- do we need this busy line?? probably 
+
+	assign rts = 1;
+	assign wreq=1;
 endmodule

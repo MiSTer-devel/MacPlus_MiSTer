@@ -8,6 +8,8 @@ set_global_assignment -name VERILOG_FILE rtl/floppy.v
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/ps2_kbd.sv
 set_global_assignment -name VERILOG_FILE rtl/ps2_mouse.v
 set_global_assignment -name VERILOG_FILE rtl/scc.v
+set_global_assignment -name VERILOG_FILE rtl/uart/txuart.v
+set_global_assignment -name VERILOG_FILE rtl/uart/rxuart.v
 set_global_assignment -name VERILOG_FILE rtl/iwm.v
 set_global_assignment -name VHDL_FILE rtl/via6522.vhd
 set_global_assignment -name VERILOG_FILE rtl/addrDecoder.v

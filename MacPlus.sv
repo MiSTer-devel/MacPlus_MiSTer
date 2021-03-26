@@ -175,7 +175,7 @@ module emu
 
 assign ADC_BUS  = 'Z;
 assign USER_OUT = '1;
-assign {UART_RTS, UART_TXD, UART_DTR} = 0;
+
 assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = 0; 
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
 
@@ -201,7 +201,7 @@ video_freak video_freak
 
 `include "build_id.v" 
 localparam CONF_STR = {
-	"MACPLUS;;",
+	"MACPLUS;UART115200;",
 	"-;",
 	"F1,DSK,Mount Pri Floppy;",
 	"F2,DSK,Mount Sec Floppy;",
@@ -215,6 +215,8 @@ localparam CONF_STR = {
 	"O5,Speed,8MHz,16MHz;",
 	"ODE,CPU,68000,68010,68020;",
 	"O4,Memory,1MB,4MB;",
+	"-;",
+	"OA,Serial,Off,On",
 	"-;",
 	"R0,Reset & Apply CPU+Memory;",
 	"V,v",`BUILD_DATE
@@ -358,11 +360,31 @@ assign AUDIO_MIX = 0;
 
 
 // set the real-world inputs to sane defaults
-localparam serialIn = 1'b0,
-			  configROMSize = 1'b1;  // 128K ROM
+localparam 	  configROMSize = 1'b1;  // 128K ROM
 
 wire [1:0] configRAMSize = status_mem?2'b11:2'b10; // 1MB/4MB
 			  
+//
+// Serial Ports
+//
+wire serialOut;
+wire serialIn;
+assign serialIn = ~status[10] ? 0 : UART_RXD;
+assign UART_TXD = serialOut;
+assign UART_RTS = UART_CTS;
+assign UART_DTR = UART_DSR;
+
+//assign {UART_RTS, UART_TXD, UART_DTR} = 0;
+/*
+	input         UART_CTS,
+	output        UART_RTS,
+	input         UART_RXD,
+	output        UART_TXD,
+	output        UART_DTR,
+	input         UART_DSR,
+*/
+
+
 // interconnects
 // CPU
 wire clk8, _cpuReset, _cpuReset_o, _cpuUDS, _cpuLDS, _cpuRW, _cpuAS;
@@ -618,7 +640,11 @@ dataController_top dc0
 	.ps2_key(ps2_key), 
 	.capslock(capslock),
 	.ps2_mouse(ps2_mouse),
+	// serial uart
 	.serialIn(serialIn),
+	.serialOut(serialOut),
+	
+	// rtc unix ticks
 	.timestamp(TIMESTAMP),
 
 	// video
