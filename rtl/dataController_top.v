@@ -47,6 +47,8 @@ module dataController_top(
 	// serial:
 	input serialIn, 
 	output serialOut,	
+	input serialCTS,
+	output serialRTS,
 
 	// RTC
 	input [32:0] timestamp,
@@ -409,7 +411,9 @@ module dataController_top(
 		.dcd_b(mouseY1),
 		.wreq(sccWReq),
 		.txd(serialOut),
-		.rxd(serialIn)
+		.rxd(serialIn),
+		.cts(serialCTS),
+		.rts(serialRTS)
 		);
 				
 	// Video

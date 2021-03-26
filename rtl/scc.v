@@ -604,7 +604,8 @@ module scc
 	 
 	 
 	 wire wreq_n;
-	assign rx_irq_pend_a =  rx_wr_a_latch & ( wr1_a[3] | wr1_a[4]) & wr3_a[0];	/* figure out the interrupt on / off */
+	//assign rx_irq_pend_a =  rx_wr_a_latch & ( (wr1_a[3] &&  ~wr1_a[4])|| (~wr1_a[3] &&  wr1_a[4])) & wr3_a[0];	/* figure out the interrupt on / off */
+	assign rx_irq_pend_a =  rx_wr_a_latch & ( (wr1_a[3] &  ~wr1_a[4])| (~wr1_a[3] &  wr1_a[4])) & wr3_a[0];	/* figure out the interrupt on / off */
 //	assign tx_irq_pend_a = 0;
 //	assign tx_irq_pend_a = tx_busy_a & wr1_a[1];
 	assign tx_irq_pend_a = (tx_busy_a_r ==1 && tx_busy_a==0) & wr1_a[1]; /* Tx always empty for now */
@@ -775,6 +776,10 @@ wr_3_a[7:6]  -- bits per char
 57600 -- 62.668800 / 57600 = 1088
 115200 -- 62.668800 / 115200 = 544
 230400 -- 62.668800 / 230400 = 272
+
+
+32.5 / 115200 = 
+
 */
 // case the baud rate based on wr12_a and 13_a
 // wr_12_a  -- contains the baud rate lower byte
@@ -812,13 +817,14 @@ wr_3_a[7:6]  -- bits per char
 
 
 //reg [23:0] baud_divid_speed_a = 24'd1088;
-reg [23:0] baud_divid_speed_a = 24'd544;
+//reg [23:0] baud_divid_speed_a = 24'd544;
+reg [23:0] baud_divid_speed_a = 24'd282;
 wire tx_busy_a;
 wire rx_wr_a;
-//wire [30:0] uart_setup_rx_a = { 1'b0, bit_per_char_a, 1'b0, parity_ena_a, 1'b0, parity_even_a, baud_divid_speed_a  } ;
-//wire [30:0] uart_setup_tx_a = { 1'b0, bit_per_char_a, 1'b0, parity_ena_a, 1'b0, parity_even_a, baud_divid_speed_a  } ;
-wire [30:0] uart_setup_rx_a = { 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, baud_divid_speed_a  } ;
-wire [30:0] uart_setup_tx_a = { 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, baud_divid_speed_a  } ;
+wire [30:0] uart_setup_rx_a = { 1'b0, bit_per_char_a, 1'b0, parity_ena_a, 1'b0, parity_even_a, baud_divid_speed_a  } ;
+wire [30:0] uart_setup_tx_a = { 1'b0, bit_per_char_a, 1'b0, parity_ena_a, 1'b0, parity_even_a, baud_divid_speed_a  } ;
+//wire [30:0] uart_setup_rx_a = { 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, baud_divid_speed_a  } ;
+//wire [30:0] uart_setup_tx_a = { 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, baud_divid_speed_a  } ;
 rxuart rxuart_a (
 	.i_clk(clk), 
 	.i_reset(reset_a|reset_hw), 

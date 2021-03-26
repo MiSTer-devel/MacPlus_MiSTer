@@ -216,7 +216,7 @@ localparam CONF_STR = {
 	"ODE,CPU,68000,68010,68020;",
 	"O4,Memory,1MB,4MB;",
 	"-;",
-	"OA,Serial,Off,On",
+	"OA,Serial,Off,On;",
 	"-;",
 	"R0,Reset & Apply CPU+Memory;",
 	"V,v",`BUILD_DATE
@@ -369,6 +369,17 @@ wire [1:0] configRAMSize = status_mem?2'b11:2'b10; // 1MB/4MB
 //
 wire serialOut;
 wire serialIn;
+wire serialCTS;
+wire serialRTS;
+
+/*
+assign serialIn = ~status[10] ? 0 : UART_RXD;
+assign UART_TXD = serialOut;
+assign serialCTS = UART_CTS;
+assign UART_RTS = serialRTS;
+assign UART_DTR = UART_DSR;
+*/
+
 assign serialIn = ~status[10] ? 0 : UART_RXD;
 assign UART_TXD = serialOut;
 assign UART_RTS = UART_CTS;
@@ -643,7 +654,9 @@ dataController_top dc0
 	// serial uart
 	.serialIn(serialIn),
 	.serialOut(serialOut),
-	
+	.serialCTS(serialCTS),
+	.serialRTS(serialRTS),
+
 	// rtc unix ticks
 	.timestamp(TIMESTAMP),
 
