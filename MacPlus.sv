@@ -382,7 +382,8 @@ assign UART_DTR = UART_DSR;
 
 assign serialIn = ~status[10] ? 0 : UART_RXD;
 assign UART_TXD = serialOut;
-assign UART_RTS = UART_CTS;
+//assign UART_RTS = UART_CTS;
+assign UART_RTS = serialRTS ;
 assign UART_DTR = UART_DSR;
 
 //assign {UART_RTS, UART_TXD, UART_DTR} = 0;

@@ -149,6 +149,7 @@ module scc
 	reg wr_data_b;
 	
 	reg rx_wr_a_latch;
+	reg rx_first_a=1;
 	always@(posedge clk /*or posedge reset*/) begin
 	
 		if (rx_wr_a) begin
@@ -165,6 +166,7 @@ module scc
 			data_b <= 0;
 			rx_wr_a_latch<=0;
 			wr_data_a<=0;
+			rx_first_a<=1;
 		end else if (cen && cs) begin
 			if (!rs[1]) begin
 				/* Default, reset index */
@@ -177,6 +179,9 @@ module scc
 				  
 					/* Add point high */
 					rindex_latch[3] <= (wdata[5:3] == 3'b001);
+					/* enable int on next rx char */
+					if (wdata[5:3] == 3'b100)
+						rx_first_a<=1;
 				end
 			end else begin
 				if (we) begin
@@ -195,6 +200,7 @@ module scc
 					// clear the read register?
 					if (rs[0]) begin 
 						rx_wr_a_latch<=0;
+						rx_first_a<=0;
 					end
 					else begin
 					
@@ -605,7 +611,19 @@ module scc
 	 
 	 wire wreq_n;
 	//assign rx_irq_pend_a =  rx_wr_a_latch & ( (wr1_a[3] &&  ~wr1_a[4])|| (~wr1_a[3] &&  wr1_a[4])) & wr3_a[0];	/* figure out the interrupt on / off */
-	assign rx_irq_pend_a =  rx_wr_a_latch & ( (wr1_a[3] &  ~wr1_a[4])| (~wr1_a[3] &  wr1_a[4])) & wr3_a[0];	/* figure out the interrupt on / off */
+	//assign rx_irq_pend_a =  rx_wr_a_latch & ( (wr1_a[3] &  ~wr1_a[4])| (~wr1_a[3] &  wr1_a[4])) & wr3_a[0];	/* figure out the interrupt on / off */
+
+	/* figure out the interrupt on / off */
+	/* rx enable: wr3_a[0] */
+	/* wr1_a  4  3
+	          0  0  = rx int disable
+	          0  1  = rx int on first char or special
+				 1  0  = rx int on all rx chars or special
+				 1  1  = rx int on special cond only
+	*/
+	//                       rx enable   char waiting        01,10 only             first char    
+	assign rx_irq_pend_a =   wr3_a[0] & rx_wr_a_latch & (wr1_a[3] ^ wr1_a[4]) & ((wr1_a[3] & rx_first_a )|(wr1_a[4]));
+
 //	assign tx_irq_pend_a = 0;
 //	assign tx_irq_pend_a = tx_busy_a & wr1_a[1];
 	assign tx_irq_pend_a = (tx_busy_a_r ==1 && tx_busy_a==0) & wr1_a[1]; /* Tx always empty for now */
@@ -785,30 +803,30 @@ wr_3_a[7:6]  -- bits per char
 // wr_12_a  -- contains the baud rate lower byte
 // wr_13_a  -- contains the baud rate high byte
 /*
-        always @(*) begin
+        always @(posedge clk) begin
                 case ({wr13_a,wr12_a})
                         16'd380:  // 300 baud
-                                baud_divid_speed_a <= 24'd208896;
+                                baud_divid_speed_a <= 24'd108333;
                         16'd94:  // 1200 baud
-                                baud_divid_speed_a <= 24'd69632;
+                                baud_divid_speed_a <= 24'd27083;
                         16'd46:  // 2400 baud
-                                baud_divid_speed_a <= 24'd26112;
+                                baud_divid_speed_a <= 24'd13542;
                         16'd22:  // 4800 baud
-                                baud_divid_speed_a <= 24'd13056;
+                                baud_divid_speed_a <= 24'd6770;
                         16'd10:  // 9600 baud
-                                baud_divid_speed_a <= 24'd6528;
-                        16'd6:  // 1440 baud
-                                baud_divid_speed_a <= 24'd4352;
+                                baud_divid_speed_a <= 24'd3385;
+                        16'd6:  // 14400 baud
+                                baud_divid_speed_a <= 24'd2257;
                         16'd4:  // 19200 baud
-                                baud_divid_speed_a <= 24'd3264;
+                                baud_divid_speed_a <= 24'd1693;
                         16'd2:  // 28800 baud
-                                baud_divid_speed_a <= 24'd2176;
+                                baud_divid_speed_a <= 24'd1128;
                         16'd1:  // 38400 baud
-                                baud_divid_speed_a <= 24'd1632;
+                                baud_divid_speed_a <= 24'd846;
                         16'd0:  // 57600 baud
-                                baud_divid_speed_a <= 24'd1088;
+                                baud_divid_speed_a <= 24'd564;
                         default: 
-                                baud_divid_speed_a <= 24'd544;
+                                baud_divid_speed_a <= 24'd282;
                 endcase
         end
 
@@ -819,6 +837,7 @@ wr_3_a[7:6]  -- bits per char
 //reg [23:0] baud_divid_speed_a = 24'd1088;
 //reg [23:0] baud_divid_speed_a = 24'd544;
 reg [23:0] baud_divid_speed_a = 24'd282;
+//reg [23:0] baud_divid_speed_a = 24'd564;
 wire tx_busy_a;
 wire rx_wr_a;
 wire [30:0] uart_setup_rx_a = { 1'b0, bit_per_char_a, 1'b0, parity_ena_a, 1'b0, parity_even_a, baud_divid_speed_a  } ;
@@ -850,6 +869,7 @@ txuart txuart_a
 	.o_uart_tx(txd), 
 	.o_busy(tx_busy_a)); // TODO -- do we need this busy line?? probably 
 
-	assign rts = 1;
+	// RTS and CTS are active low
+	assign rts = rx_wr_a_latch;
 	assign wreq=1;
 endmodule
