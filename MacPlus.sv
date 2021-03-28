@@ -216,8 +216,8 @@ localparam CONF_STR = {
 	"ODE,CPU,68000,68010,68020;",
 	"O4,Memory,1MB,4MB;",
 	"-;",
-	"OA,Serial,Off,On;",
-	"-;",
+	//"OA,Serial,Off,On;",
+	//"-;",
 	"R0,Reset & Apply CPU+Memory;",
 	"V,v",`BUILD_DATE
 };
@@ -380,7 +380,8 @@ assign UART_RTS = serialRTS;
 assign UART_DTR = UART_DSR;
 */
 
-assign serialIn = ~status[10] ? 0 : UART_RXD;
+//assign serialIn = ~status[10] ? 0 : UART_RXD;
+assign serialIn =  UART_RXD;
 assign UART_TXD = serialOut;
 //assign UART_RTS = UART_CTS;
 assign UART_RTS = serialRTS ;
