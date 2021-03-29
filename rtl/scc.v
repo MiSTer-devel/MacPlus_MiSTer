@@ -85,7 +85,7 @@ module scc
 	reg [7:0] 	wr1_a;
 	reg [7:0] 	wr1_b;
 	reg [7:0] 	wr2;
-	reg [7:0] 	wr3_a;
+	reg [7:0] 	wr3_a;   /* synthesis keep */
 	reg [7:0] 	wr3_b;
 	reg [7:0] 	wr4_a;
 	reg [7:0] 	wr4_b;
@@ -110,8 +110,10 @@ module scc
 	/* Status latches */
 	reg		latch_open_a;
 	reg		latch_open_b;
+	reg		cts_latch_a;
 	reg		dcd_latch_a;
 	reg		dcd_latch_b;
+	wire		cts_ip_a;
 	wire		dcd_ip_a;
 	wire		dcd_ip_b;
 	wire		do_latch_a;
@@ -489,7 +491,7 @@ module scc
 	/* RR0 */
 	assign rr0_a = { 1'b0, /* Break */
 			 1'b1, /* Tx Underrun/EOM */
-			 1'b0, /* CTS */
+			 wr15_a[5] ? cts_latch_a : cts_a, /* CTS */
 			 1'b0, /* Sync/Hunt */
 			 wr15_a[3] ? dcd_latch_a : dcd_a, /* DCD */
 			 //1'b1, /*TX EMPTY */
@@ -515,7 +517,7 @@ module scc
 			 1'b0, /* Residue code 0 */
 			 1'b1, /* Residue code 1 */
 			 1'b1, /* Residue code 2 */
-			 1'b1  /* All sent */
+			 ~tx_busy_a  /* All sent */
 			 };
 	
 	assign rr1_b = { 1'b0, /* End of frame */
@@ -597,16 +599,12 @@ module scc
 	 * it's not a permanent state. For now keep it clear. Will have to fix that.
 	* TODO: AJS - look at tx and interrupt logic
 	 */
-	 
 	 reg tx_busy_a_r;
 	 always @(posedge clk) begin
 		tx_busy_a_r <= tx_busy_a;
+		
 	 end
 
-	 reg rx_ready_a_r;
-	 always @(posedge clk) begin
-		rx_ready_a_r <= ~wreq_n;
-	 end
 	 
 	 
 	 wire wreq_n;
@@ -628,7 +626,10 @@ module scc
 //	assign tx_irq_pend_a = tx_busy_a & wr1_a[1];
 	assign tx_irq_pend_a = (tx_busy_a_r ==1 && tx_busy_a==0) & wr1_a[1]; /* Tx always empty for now */
 //assign tx_irq_pend_a =  wr1_a[1]; /* Tx always empty for now */
-	assign ex_irq_pend_a = ex_irq_ip_a;
+
+   wire cts_interrupt = wr1_a[0] &&  wr15_a[5] || (tx_busy_a_r ==1 && tx_busy_a==0) || (tx_busy_a_r ==0 && tx_busy_a==1);/* if cts changes */
+
+	assign ex_irq_pend_a = ex_irq_ip_a ; 
 	assign rx_irq_pend_b = 0;
 	assign tx_irq_pend_b = 0 /*& wr1_b[1]*/; /* Tx always empty for now */
 	assign ex_irq_pend_b = ex_irq_ip_b;
@@ -656,12 +657,13 @@ module scc
 	 * corresponding interrupt is enabled in WR15
 	 */
 	assign dcd_ip_a = (dcd_a != dcd_latch_a) & wr15_a[3];
+	assign cts_ip_a = (cts_a != cts_latch_a) & wr15_a[5];
 	assign dcd_ip_b = (dcd_b != dcd_latch_b) & wr15_b[3];
 
 	/* Latches close when an enabled IP bit is set and latches
 	 * are currently open
 	 */
-	assign do_latch_a = latch_open_a & (dcd_ip_a /* | cts... */);
+	assign do_latch_a = latch_open_a & (dcd_ip_a | cts_ip_a  /* | cts... */);
 	assign do_latch_b = latch_open_b & (dcd_ip_b /* | cts... */);
 
 	/* "Master" interrupt, set when latch close & WR1[0] is set */
@@ -712,10 +714,12 @@ module scc
 	always@(posedge clk or posedge reset) begin
 		if (reset) begin
 			dcd_latch_a <= 0;
+			cts_latch_a <= 0;
 			/* cts ... */
 		end else if(cep) begin
 			if (do_latch_a)
 			  dcd_latch_a <= dcd_a;
+			  cts_latch_a <= cts_a;
 			/* cts ... */
 		end
 	end
@@ -729,6 +733,8 @@ module scc
 			/* cts ... */
 		end
 	end
+	
+
 
 	/* NYI */
 //	assign txd = 1;
@@ -869,6 +875,8 @@ txuart txuart_a
 	.o_uart_tx(txd), 
 	.o_busy(tx_busy_a)); // TODO -- do we need this busy line?? probably 
 
+	wire cts_a = ~tx_busy_a;
+	
 	// RTS and CTS are active low
 	assign rts = rx_wr_a_latch;
 	assign wreq=1;
