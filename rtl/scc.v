@@ -599,10 +599,73 @@ module scc
 	 * it's not a permanent state. For now keep it clear. Will have to fix that.
 	* TODO: AJS - look at tx and interrupt logic
 	 */
+	 
+	 /*
+	 The TxIP is reset either by writing data to the transmit buffer or by issuing the Reset Tx Int command in WR0
+	 */
+
+reg tx_fin_pre;
+reg tx_ip;
+reg tx_mip;
+
+/*
+reg tx_ie;
+always @(posedge clk) begin
+	if (reset_a|reset_hw|reset)
+		tx_ie<=0;
+	else if (wreg_a & (rindex == 1) )
+		tx_ie<=wdata[1];
+end
+*/
+
+always @(posedge clk) begin
+	if (reset) begin
+      tx_ip<=0;
+      tx_mip<=0;
+	end
+	else begin
+      tx_fin_pre<=tx_busy_a;
+		 
+		if (wr5_a[3] &  wr1_a[1] & tx_busy_a & ~tx_fin_pre) begin
+			tx_ip<=~tx_mip;
+			tx_mip<=0;
+		end
+		if (wreg_a & (rindex == 0) & (wdata[5:3] == 3'b111)) begin
+			tx_ip<=0;
+		end
+		if (wreg_a & (rindex == 0) & (wdata[5:3] == 3'b101)) begin
+          // If CIP=1, inhibit generation of next TX interrupt
+          // Actually, "Reset TxInt pend." clears current interrupt
+          tx_mip<= ~tx_ip;
+          tx_ip<=0;
+		end
+		if (wr5_a[3]==0)begin
+			tx_mip<=0;
+			tx_ip<=0;
+		end
+	end	
+end
+
+
+
+
+
 	 reg tx_busy_a_r;
+	 reg tx_latch_a;
 	 always @(posedge clk) begin
 		tx_busy_a_r <= tx_busy_a;
-		
+		// when we transition from empty to full, we create an interrupt
+		if (reset | reset_hw | reset_a)
+			tx_latch_a<=0;
+		else if  (tx_busy_a_r ==1 && tx_busy_a==0)
+			tx_latch_a<=1;
+		// cleared when we write again
+		else if (wr_data_a)
+			tx_latch_a<=0;
+		// or when we set the reset in wr0
+		else if (wreg_a & (rindex == 0) & (wdata[5:3] == 3'b010))
+			tx_latch_a<=0;
+		//else if (wreg_a & (rindex == 0) & (wdata[5:3] == 3'b111)) // clear highest under service?
 	 end
 
 	 
@@ -624,7 +687,8 @@ module scc
 
 //	assign tx_irq_pend_a = 0;
 //	assign tx_irq_pend_a = tx_busy_a & wr1_a[1];
-	assign tx_irq_pend_a = (tx_busy_a_r ==1 && tx_busy_a==0) & wr1_a[1]; /* Tx always empty for now */
+
+	assign tx_irq_pend_a = tx_ip;
 //assign tx_irq_pend_a =  wr1_a[1]; /* Tx always empty for now */
 
    wire cts_interrupt = wr1_a[0] &&  wr15_a[5] || (tx_busy_a_r ==1 && tx_busy_a==0) || (tx_busy_a_r ==0 && tx_busy_a==1);/* if cts changes */
@@ -635,6 +699,8 @@ module scc
 	assign ex_irq_pend_b = ex_irq_ip_b;
 
 	assign _irq = ~(wr9[3] & (rx_irq_pend_a |
+				  
+				  
 				  rx_irq_pend_b |
 				  tx_irq_pend_a |
 				  tx_irq_pend_b |
