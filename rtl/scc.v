@@ -62,7 +62,8 @@ module scc
 	wire		reset;
 
 	/* Data registers */
-	reg [7:0] 	data_a = 0;
+//	reg [7:0] 	data_a = 0;
+	wire[7:0] 	data_a ;
 	reg [7:0] 	data_b = 0;
 
 	/* Read registers */
@@ -84,6 +85,10 @@ module scc
 	reg [7:0] 	wr1_a;
 	reg [7:0] 	wr1_b;
 	reg [7:0] 	wr2;
+	reg [7:0] 	wr3_a;   /* synthesis keep */
+	reg [7:0] 	wr3_b;
+	reg [7:0] 	wr4_a;
+	reg [7:0] 	wr4_b;
 	reg [7:0] 	wr5_a;
 	reg [7:0] 	wr5_b;
 	reg [7:0] 	wr6_a;
@@ -105,8 +110,10 @@ module scc
 	/* Status latches */
 	reg		latch_open_a;
 	reg		latch_open_b;
+	reg		cts_latch_a;
 	reg		dcd_latch_a;
 	reg		dcd_latch_b;
+	wire		cts_ip_a;
 	wire		dcd_ip_a;
 	wire		dcd_ip_b;
 	wire		do_latch_a;
@@ -125,6 +132,10 @@ module scc
 	reg		ex_irq_ip_b;
 	wire [2:0] 	rr2_vec_stat;	
 
+	reg [7:0] tx_data_a;
+	reg wr8_wr_a;
+	reg wr8_wr_b;
+		
 	/* Register/Data access helpers */
 	assign wreg_a  = cs & we & (~rs[1]) &  rs[0];
 	assign wreg_b  = cs & we & (~rs[1]) & ~rs[0];
@@ -136,11 +147,28 @@ module scc
 	/* Register index is set by a write to WR0 and reset
 	 * after any subsequent write. We ignore the side
 	 */
-	always@(posedge clk or posedge reset) begin
+	reg wr_data_a;
+	reg wr_data_b;
+	
+	reg rx_wr_a_latch;
+	reg rx_first_a=1;
+	always@(posedge clk /*or posedge reset*/) begin
+	
+		if (rx_wr_a) begin
+			rx_wr_a_latch<=1;
+		end
+	
+	
+		wr_data_a<=0;
+		wr_data_b<=0;
 		if (reset) begin
 		  rindex_latch <= 0;
-			data_a <= 0;
+			//data_a <= 0;
+			tx_data_a<=0;
 			data_b <= 0;
+			rx_wr_a_latch<=0;
+			wr_data_a<=0;
+			rx_first_a<=1;
 		end else if (cen && cs) begin
 			if (!rs[1]) begin
 				/* Default, reset index */
@@ -153,11 +181,32 @@ module scc
 				  
 					/* Add point high */
 					rindex_latch[3] <= (wdata[5:3] == 3'b001);
+					/* enable int on next rx char */
+					if (wdata[5:3] == 3'b100)
+						rx_first_a<=1;
 				end
 			end else begin
 				if (we) begin
-					if (rs[0]) data_a <= wdata;
-					else data_b <= wdata;
+					if (rs[0]) begin 
+						//data_a <= wdata;
+						tx_data_a <= wdata;
+						wr_data_a<=1;
+					end
+					else
+						begin
+						data_b <= wdata;
+						wr_data_b<=1;
+						end
+					end
+				else begin
+					// clear the read register?
+					if (rs[0]) begin 
+						rx_wr_a_latch<=0;
+						rx_first_a<=0;
+					end
+					else begin
+					
+					end
 				end
 			end
 		end
@@ -207,6 +256,37 @@ module scc
 		  wr2 <= wdata;			
 	end
 
+	/* WR3
+	 * Reset: unchanged 
+	 */
+	always@(posedge clk or posedge reset_hw) begin
+		if (reset_hw)
+		  wr3_a <= 0;
+		else if (cen && wreg_a && rindex == 3)
+		  wr3_a <= wdata;
+	end
+	always@(posedge clk or posedge reset_hw) begin
+		if (reset_hw)
+		  wr3_b <= 0;		
+		else if (cen && wreg_b && rindex == 3)
+		  wr3_b <= wdata;
+	end
+	/* WR4
+	 * Reset: unchanged 
+	 */
+	always@(posedge clk or posedge reset_hw) begin
+		if (reset_hw)
+		  wr4_a <= 0;
+		else if (cen && wreg_a && rindex == 4)
+		  wr4_a <= wdata;
+	end
+	always@(posedge clk or posedge reset_hw) begin
+		if (reset_hw)
+		  wr4_b <= 0;		
+		else if (cen && wreg_b && rindex == 4)
+		  wr4_b <= wdata;
+	end
+
 	/* WR5
 	 * Reset: Bits 7,4,3,2,1 to 0
 	 */
@@ -231,6 +311,39 @@ module scc
 		end
 	end
 
+	/* WR8 : write data to serial port -- a or b?
+	 * 
+	 */
+	always@(posedge clk or posedge reset_hw) begin
+		if (reset_hw) begin
+			wr8_a <= 0;
+			wr8_wr_a <= 1'b0;
+		end
+		else if (cen && (rs[1] & we ) && rindex == 8) begin
+			wr8_wr_a <= 1'b1;
+			wr8_a <= wdata;			
+		end
+		else begin
+	          wr8_wr_a <= 1'b0;
+		end
+	end
+
+	always@(posedge clk or posedge reset_hw) begin
+		if (reset_hw) begin
+		  wr8_b <= 0;
+	          wr8_wr_b <= 1'b0;
+		end
+		else if (cen && (wreg_b ) && rindex == 8)
+		begin
+	          wr8_wr_b <= 1'b1;
+		  wr8_b <= wdata;			
+		end
+		else
+		begin
+	          wr8_wr_b <= 1'b0;
+		end
+	end
+	
 	/* WR9. Special: top bits are reset, handled separately, bottom
 	 * bits are only reset by a hw reset
 	 */
@@ -378,12 +491,13 @@ module scc
 	/* RR0 */
 	assign rr0_a = { 1'b0, /* Break */
 			 1'b1, /* Tx Underrun/EOM */
-			 1'b0, /* CTS */
+			 wr15_a[5] ? cts_latch_a : cts_a, /* CTS */
 			 1'b0, /* Sync/Hunt */
 			 wr15_a[3] ? dcd_latch_a : dcd_a, /* DCD */
-			 1'b1, /* Tx Empty */
+			 //1'b1, /*TX EMPTY */
+			 ~tx_busy_a, /* Tx Empty */
 			 1'b0, /* Zero Count */
-			 1'b0  /* Rx Available */
+			 rx_wr_a_latch  /* Rx Available */
 			 };
 	assign rr0_b = { 1'b0, /* Break */
 			 1'b1, /* Tx Underrun/EOM */
@@ -397,13 +511,13 @@ module scc
 
 	/* RR1 */
 	assign rr1_a = { 1'b0, /* End of frame */
-			 1'b0, /* CRC/Framing error */
+			 1'b0,//frame_err_a, /* CRC/Framing error */
 			 1'b0, /* Rx Overrun error */
-			 1'b0, /* Parity error */
+			 1'b0,//parity_err_a, /* Parity error */
 			 1'b0, /* Residue code 0 */
 			 1'b1, /* Residue code 1 */
 			 1'b1, /* Residue code 2 */
-			 1'b1  /* All sent */
+			 ~tx_busy_a  /* All sent */
 			 };
 	
 	assign rr1_b = { 1'b0, /* End of frame */
@@ -483,15 +597,110 @@ module scc
 	 *
 	 * Need to add latches. Tx irq is latched when buffer goes from full->empty,
 	 * it's not a permanent state. For now keep it clear. Will have to fix that.
+	* TODO: AJS - look at tx and interrupt logic
 	 */
-	assign rx_irq_pend_a = 0;
-	assign tx_irq_pend_a = 0 /*& wr1_a[1]*/; /* Tx always empty for now */
-	assign ex_irq_pend_a = ex_irq_ip_a;
+	 
+	 /*
+	 The TxIP is reset either by writing data to the transmit buffer or by issuing the Reset Tx Int command in WR0
+	 */
+
+reg tx_fin_pre;
+reg tx_ip;
+reg tx_mip;
+
+/*
+reg tx_ie;
+always @(posedge clk) begin
+	if (reset_a|reset_hw|reset)
+		tx_ie<=0;
+	else if (wreg_a & (rindex == 1) )
+		tx_ie<=wdata[1];
+end
+*/
+
+always @(posedge clk) begin
+	if (reset) begin
+      tx_ip<=0;
+      tx_mip<=0;
+	end
+	else begin
+      tx_fin_pre<=tx_busy_a;
+		 
+		if (wr5_a[3] &  wr1_a[1] & tx_busy_a & ~tx_fin_pre) begin
+			tx_ip<=~tx_mip;
+			tx_mip<=0;
+		end
+		if (wreg_a & (rindex == 0) & (wdata[5:3] == 3'b111)) begin
+			tx_ip<=0;
+		end
+		if (wreg_a & (rindex == 0) & (wdata[5:3] == 3'b101)) begin
+          // If CIP=1, inhibit generation of next TX interrupt
+          // Actually, "Reset TxInt pend." clears current interrupt
+          tx_mip<= ~tx_ip;
+          tx_ip<=0;
+		end
+		if (wr5_a[3]==0)begin
+			tx_mip<=0;
+			tx_ip<=0;
+		end
+	end	
+end
+
+
+
+
+
+	 reg tx_busy_a_r;
+	 reg tx_latch_a;
+	 always @(posedge clk) begin
+		tx_busy_a_r <= tx_busy_a;
+		// when we transition from empty to full, we create an interrupt
+		if (reset | reset_hw | reset_a)
+			tx_latch_a<=0;
+		else if  (tx_busy_a_r ==1 && tx_busy_a==0)
+			tx_latch_a<=1;
+		// cleared when we write again
+		else if (wr_data_a)
+			tx_latch_a<=0;
+		// or when we set the reset in wr0
+		else if (wreg_a & (rindex == 0) & (wdata[5:3] == 3'b010))
+			tx_latch_a<=0;
+		//else if (wreg_a & (rindex == 0) & (wdata[5:3] == 3'b111)) // clear highest under service?
+	 end
+
+	 
+	 
+	 wire wreq_n;
+	//assign rx_irq_pend_a =  rx_wr_a_latch & ( (wr1_a[3] &&  ~wr1_a[4])|| (~wr1_a[3] &&  wr1_a[4])) & wr3_a[0];	/* figure out the interrupt on / off */
+	//assign rx_irq_pend_a =  rx_wr_a_latch & ( (wr1_a[3] &  ~wr1_a[4])| (~wr1_a[3] &  wr1_a[4])) & wr3_a[0];	/* figure out the interrupt on / off */
+
+	/* figure out the interrupt on / off */
+	/* rx enable: wr3_a[0] */
+	/* wr1_a  4  3
+	          0  0  = rx int disable
+	          0  1  = rx int on first char or special
+				 1  0  = rx int on all rx chars or special
+				 1  1  = rx int on special cond only
+	*/
+	//                       rx enable   char waiting        01,10 only             first char    
+	assign rx_irq_pend_a =   wr3_a[0] & rx_wr_a_latch & (wr1_a[3] ^ wr1_a[4]) & ((wr1_a[3] & rx_first_a )|(wr1_a[4]));
+
+//	assign tx_irq_pend_a = 0;
+//	assign tx_irq_pend_a = tx_busy_a & wr1_a[1];
+
+	assign tx_irq_pend_a = tx_ip;
+//assign tx_irq_pend_a =  wr1_a[1]; /* Tx always empty for now */
+
+   wire cts_interrupt = wr1_a[0] &&  wr15_a[5] || (tx_busy_a_r ==1 && tx_busy_a==0) || (tx_busy_a_r ==0 && tx_busy_a==1);/* if cts changes */
+
+	assign ex_irq_pend_a = ex_irq_ip_a ; 
 	assign rx_irq_pend_b = 0;
 	assign tx_irq_pend_b = 0 /*& wr1_b[1]*/; /* Tx always empty for now */
 	assign ex_irq_pend_b = ex_irq_ip_b;
 
 	assign _irq = ~(wr9[3] & (rx_irq_pend_a |
+				  
+				  
 				  rx_irq_pend_b |
 				  tx_irq_pend_a |
 				  tx_irq_pend_b |
@@ -514,12 +723,13 @@ module scc
 	 * corresponding interrupt is enabled in WR15
 	 */
 	assign dcd_ip_a = (dcd_a != dcd_latch_a) & wr15_a[3];
+	assign cts_ip_a = (cts_a != cts_latch_a) & wr15_a[5];
 	assign dcd_ip_b = (dcd_b != dcd_latch_b) & wr15_b[3];
 
 	/* Latches close when an enabled IP bit is set and latches
 	 * are currently open
 	 */
-	assign do_latch_a = latch_open_a & (dcd_ip_a /* | cts... */);
+	assign do_latch_a = latch_open_a & (dcd_ip_a | cts_ip_a  /* | cts... */);
 	assign do_latch_b = latch_open_b & (dcd_ip_b /* | cts... */);
 
 	/* "Master" interrupt, set when latch close & WR1[0] is set */
@@ -570,10 +780,12 @@ module scc
 	always@(posedge clk or posedge reset) begin
 		if (reset) begin
 			dcd_latch_a <= 0;
+			cts_latch_a <= 0;
 			/* cts ... */
 		end else if(cep) begin
 			if (do_latch_a)
 			  dcd_latch_a <= dcd_a;
+			  cts_latch_a <= cts_a;
 			/* cts ... */
 		end
 	end
@@ -587,10 +799,151 @@ module scc
 			/* cts ... */
 		end
 	end
+	
+
 
 	/* NYI */
-	assign txd = 1;
-	assign rts = 1;
+//	assign txd = 1;
+//	assign rts = 1;
 
-	assign wreq = 1;	
+	/* UART */
+
+//wr_3_a
+//wr_3_b
+// bit 
+wire parity_ena_a= wr4_a[0];
+wire parity_even_a= wr4_a[1];
+reg [1:0] stop_bits_a= 2'b00;
+reg [1:0] bit_per_char_a = 2'b00;
+/*
+76543210
+data>>2 & 3
+wr4_a[3:2] 
+case(wr4_a[3:2])
+2'b00:
+// sync mode enable
+2'b01:
+// 1 stop bit
+	stop_bits_a <= 2'b0;
+2'b10:
+// 1.5 stop bit
+	stop_bits_a <= 2'b0;
+2'b11:
+// 2 stop bit
+	stop_bits_a <= 2'b1;
+default:
+	stop_bits_a <= 2'b0;
+endcase
+
+*/
+/*
+76543210
+^__ 76 
+wr_3_a[7:6]  -- bits per char
+
+                case (wr_3_a[7:6]})
+                        2'b00:  // 5
+				bit_per_char_a  <= 2'b11;
+                        2'b01:  // 7
+				bit_per_char_a  <= 2'b01;
+                        2'b10:  // 6 
+				bit_per_char_a  <= 2'b10;
+                        2'b11:  // 8
+				bit_per_char_a  <= 2'b00;
+		endcase
+*/
+/*
+300 -- 62.668800 /  =  208896
+600 -- 62.668800 /  =  104448
+1200-- 62.668800 /  =  69632
+2400 -- 62.668800 / 2400 = 26112
+4800 -- 62.668800 / 4800  = 13056
+9600 -- 62.668800 / 9600 = 6528
+1440 -- 62.668800 / 14400 = 4352
+19200 -- 62.668800 /  19200= 3264
+38400 -- 62.668800 / 28800 =  2176
+38400 -- 62.668800 / 38400 =  1632
+57600 -- 62.668800 / 57600 = 1088
+115200 -- 62.668800 / 115200 = 544
+230400 -- 62.668800 / 230400 = 272
+
+
+32.5 / 115200 = 
+
+*/
+// case the baud rate based on wr12_a and 13_a
+// wr_12_a  -- contains the baud rate lower byte
+// wr_13_a  -- contains the baud rate high byte
+/*
+        always @(posedge clk) begin
+                case ({wr13_a,wr12_a})
+                        16'd380:  // 300 baud
+                                baud_divid_speed_a <= 24'd108333;
+                        16'd94:  // 1200 baud
+                                baud_divid_speed_a <= 24'd27083;
+                        16'd46:  // 2400 baud
+                                baud_divid_speed_a <= 24'd13542;
+                        16'd22:  // 4800 baud
+                                baud_divid_speed_a <= 24'd6770;
+                        16'd10:  // 9600 baud
+                                baud_divid_speed_a <= 24'd3385;
+                        16'd6:  // 14400 baud
+                                baud_divid_speed_a <= 24'd2257;
+                        16'd4:  // 19200 baud
+                                baud_divid_speed_a <= 24'd1693;
+                        16'd2:  // 28800 baud
+                                baud_divid_speed_a <= 24'd1128;
+                        16'd1:  // 38400 baud
+                                baud_divid_speed_a <= 24'd846;
+                        16'd0:  // 57600 baud
+                                baud_divid_speed_a <= 24'd564;
+                        default: 
+                                baud_divid_speed_a <= 24'd282;
+                endcase
+        end
+
+*/
+
+
+
+//reg [23:0] baud_divid_speed_a = 24'd1088;
+//reg [23:0] baud_divid_speed_a = 24'd544;
+reg [23:0] baud_divid_speed_a = 24'd282;
+//reg [23:0] baud_divid_speed_a = 24'd564;
+wire tx_busy_a;
+wire rx_wr_a;
+wire [30:0] uart_setup_rx_a = { 1'b0, bit_per_char_a, 1'b0, parity_ena_a, 1'b0, parity_even_a, baud_divid_speed_a  } ;
+wire [30:0] uart_setup_tx_a = { 1'b0, bit_per_char_a, 1'b0, parity_ena_a, 1'b0, parity_even_a, baud_divid_speed_a  } ;
+//wire [30:0] uart_setup_rx_a = { 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, baud_divid_speed_a  } ;
+//wire [30:0] uart_setup_tx_a = { 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, baud_divid_speed_a  } ;
+rxuart rxuart_a (
+	.i_clk(clk), 
+	.i_reset(reset_a|reset_hw), 
+	.i_setup(uart_setup_rx_a), 
+	.i_uart_rx(rxd), 
+	.o_wr(rx_wr_a), // TODO -- check on this flag
+	.o_data(data_a),   // TODO we need to save this off only if wreq is set, and mux it into data_a in the right spot
+	.o_break(break_a),
+	.o_parity_err(parity_err_a), 
+	.o_frame_err(frame_err_a), 
+	.o_ck_uart()
+	);
+txuart txuart_a
+	(
+	.i_clk(clk), 
+	.i_reset(reset_a|reset_hw), 
+	.i_setup(uart_setup_tx_a), 
+	.i_break(1'b0), 
+	.i_wr(wr_data_a),   // TODO -- we need to send data when we get the register command i guess???
+	.i_data(tx_data_a),
+	//.i_cts_n(~cts), 
+	.i_cts_n(1'b0), 
+	.o_uart_tx(txd), 
+	.o_busy(tx_busy_a)); // TODO -- do we need this busy line?? probably 
+
+	wire cts_a = ~tx_busy_a;
+	
+	// RTS and CTS are active low
+	assign rts = rx_wr_a_latch;
+	assign wreq=1;
 endmodule

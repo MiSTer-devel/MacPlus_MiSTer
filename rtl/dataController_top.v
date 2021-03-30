@@ -47,6 +47,8 @@ module dataController_top(
 	// serial:
 	input serialIn, 
 	output serialOut,	
+	input serialCTS,
+	output serialRTS,
 
 	// RTC
 	input [32:0] timestamp,
@@ -148,8 +150,6 @@ module dataController_top(
 		!_sccIrq?3'b101:
 		3'b111;
 		
-	// Serial port
-	assign serialOut = 0;
 
 	reg [15:0] cpu_data;
 	always @(posedge clk32) if (cpuBusControl && memoryLatch) cpu_data <= memoryDataIn;
@@ -409,8 +409,13 @@ module dataController_top(
 		._irq(_sccIrq),
 		.dcd_a(mouseX1),
 		.dcd_b(mouseY1),
-		.wreq(sccWReq));
-		
+		.wreq(sccWReq),
+		.txd(serialOut),
+		.rxd(serialIn),
+		.cts(serialCTS),
+		.rts(serialRTS)
+		);
+				
 	// Video
 	videoShifter vs(
 		.clk32(clk32), 
