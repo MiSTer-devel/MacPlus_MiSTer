@@ -266,13 +266,13 @@ end
 // the status register is controlled by the on screen display (OSD)
 wire [31:0] status;
 wire  [1:0] buttons;
-wire [31:0] sd_lba[2];
+wire [31:0] sd_lba;
 wire  [1:0] sd_rd;
 wire  [1:0] sd_wr;
 wire  [1:0] sd_ack;
 wire  [7:0] sd_buff_addr;
 wire [15:0] sd_buff_dout;
-wire [15:0] sd_buff_din[2];
+wire [15:0] sd_buff_din;
 wire        sd_buff_wr;
 wire  [1:0] img_mounted;
 wire [31:0] img_size;
@@ -297,14 +297,14 @@ hps_io #(.CONF_STR(CONF_STR), .VDNUM(2), .WIDE(1)) hps_io
 	.buttons(buttons),
 	.status(status),
 
-	.sd_lba(sd_lba),
+	.sd_lba('{sd_lba,sd_lba}),
 	.sd_rd(sd_rd),
 	.sd_wr(sd_wr),
 	.sd_ack(sd_ack),
 
 	.sd_buff_addr(sd_buff_addr),
 	.sd_buff_dout(sd_buff_dout),
-	.sd_buff_din(sd_buff_din),
+	.sd_buff_din('{sd_buff_din,sd_buff_din}),
 	.sd_buff_wr(sd_buff_wr),
 	
 	.img_mounted(img_mounted),
@@ -687,16 +687,14 @@ dataController_top dc0
 	// block device interface for scsi disk
 	.img_mounted(img_mounted),
 	.img_size(img_size),
-	.io_lba0(sd_lba[0]),
-	.io_lba1(sd_lba[1]),
+	.io_lba(sd_lba),
 	.io_rd(sd_rd),
 	.io_wr(sd_wr),
 	.io_ack(sd_ack),
 
 	.sd_buff_addr(sd_buff_addr),
 	.sd_buff_dout(sd_buff_dout),
-	.sd_buff_din0(sd_buff_din[0]),
-	.sd_buff_din1(sd_buff_din[1]),
+	.sd_buff_din(sd_buff_din),
 	.sd_buff_wr(sd_buff_wr)
 );
 

@@ -45,38 +45,38 @@
 module ncr5380
 (
 	input    		clk,
-	input    		ce,
-
 	input 	     	reset,
 
 	/* Bus interface. 3-bit address, to be wired
 	 * appropriately upstream (to A4..A6) plus one
 	 * more bit (A9) wired as dack.
 	 */
-	input 	     bus_cs,
-	input 	     bus_we,
+	input         bus_cs,
 	input   [2:0] bus_rs,
-	input 	     dack,
+	input         ior,
+	input         iow,
+	input         dack,
+	output        dreq,
 	input   [7:0] wdata,
 	output  [7:0] rdata,
 
-
 	// connections to io controller
-	input   [1:0] img_mounted,
-	input  [31:0] img_size,
+	input  [DEVS-1:0] img_mounted,
+	input      [31:0] img_size,
 	
-	output [31:0] io_lba0,
-	output [31:0] io_lba1,
-	output  [1:0] io_rd,
-	output  [1:0] io_wr,
-	input   [1:0] io_ack,
+	output reg [31:0] io_lba,
+	output [DEVS-1:0] io_rd,
+	output [DEVS-1:0] io_wr,
+	input  [DEVS-1:0] io_ack,
 
-	input   [7:0] sd_buff_addr,
-	input  [15:0] sd_buff_dout,
-	output [15:0] sd_buff_din0,
-	output [15:0] sd_buff_din1,
-	input         sd_buff_wr
+	input        [7:0] sd_buff_addr,
+	input       [15:0] sd_buff_dout,
+	output  reg [15:0] sd_buff_din,
+	input              sd_buff_wr
 );
+	parameter DEVS = 2;
+
+	assign dreq = scsi_req & dma_en;
 
 	reg  [7:0] mr;        /* Mode Register */
 	reg  [7:0] icr;       /* Initiator Command Register */
@@ -86,21 +86,20 @@ module ncr5380
 	/* Data in and out latches and associated
 	* control logic for DMA
 	*/
-	wire [7:0] din;
+	reg  [7:0] din;
 	reg  [7:0] dout;
-	reg        dphase;
 	reg        dma_en;
 
 	/* --- Main host-side interface --- */
 
 	/* Register & DMA accesses decodes */
-	reg dma_rd;
 	reg dma_wr;
 	reg reg_wr;
+	reg dma_ack;
 
-	wire i_dma_rd = bus_cs &  dack & ~bus_we;
-	wire i_dma_wr = bus_cs &  dack &  bus_we;
-	wire i_reg_wr = bus_cs & ~dack &  bus_we;
+	wire i_dma_rd = bus_cs &  dack & ior;
+	wire i_dma_wr = bus_cs &  dack & iow;
+	wire i_reg_wr = bus_cs & ~dack & iow;
 
 	always @(posedge clk) begin
 		reg old_dma_rd, old_dma_wr, old_reg_wr;
@@ -109,13 +108,13 @@ module ncr5380
 		old_dma_wr <= i_dma_wr;
 		old_reg_wr <= i_reg_wr;
 
-		dma_rd <= 0;
 		dma_wr <= 0;
+		dma_ack <= 0;
 		reg_wr <= 0;
 
 		if(~old_dma_wr & i_dma_wr) dma_wr <= 1;
-		else if(~old_dma_rd & i_dma_rd) dma_rd <= 1;
-		else if(~old_reg_wr & i_reg_wr) reg_wr <= 1;
+		if(~old_reg_wr & i_reg_wr) reg_wr <= 1;
+		if((old_dma_wr & ~i_dma_wr) | (old_dma_rd & ~i_dma_rd)) dma_ack <= dma_en;
 	end
 
 	/* System bus reads */
@@ -130,45 +129,20 @@ module ncr5380
 	               bus_rs == `RREG_RST ? 8'hff            :
 	               8'hff;
 
-   /* DMA handhsaking logic. Two phase logic, in phase 0
-    * DRQ follows SCSI _REQ until we see DACK. In phase 1
-    * we just wait for SCSI _REQ to go down and go back to
-    * phase 0. We assert SCSI _ACK in phase 1.
-    */
-	always@(posedge clk or posedge reset) begin
-		if (reset) begin
-			dphase <= 0;
-		end else begin
-			if (!dma_en) begin
-				dphase <= 0;
-			end else if (dphase == 0) begin
-				/* Be careful to do that in bus phase 1,
-				* not phase 0, or we would incorrectly
-				* assert bus_hold and lock up the system
-				*/
-				if ((dma_rd || dma_wr) && scsi_req) begin
-					dphase <= 1;
-				end
-			end else if (!scsi_req) begin
-				dphase <= 0;
-			end
-		end
-	end
-   
 	/* Data out latch (in DMA mode, this is one cycle after we've
 	* asserted ACK)
 	*/
 	always@(posedge clk) if((reg_wr && bus_rs == `WREG_ODR) || dma_wr) dout <= wdata;
-   
+
 	/* Current data register. Simplified logic: We loop back the
 	* output data if we are asserting the bus, else we get the
 	* input latch
     */
 	wire [7:0] cur_data = out_en ? dout : din;
-   
+
 	/* Logic for "asserting the bus" simplified */
 	wire       out_en = icr[`ICR_A_DATA] | mr[`MR_ARB];
-   
+
 	/* ICR read wires */
 	wire [7:0] icr_read = { icr[`ICR_A_RST],
 	                        icr_aip,
@@ -241,119 +215,94 @@ module ncr5380
    /* BSY logic (simplified arbitration, see notes) */
 	wire scsi_bsy = 
 	    icr[`ICR_A_BSY] |
-	    scsi2_bsy |
-	    scsi6_bsy |
+	    |target_bsy |
+	    //scsi2_bsy |
+	    //scsi6_bsy |
 	    mr[`MR_ARB];
 
 	/* Remains of simplified arbitration logic */
 	wire icr_aip = mr[`MR_ARB];
 	wire icr_la = 0;
 
-	reg 	dma_ack;
-	always @(posedge clk) if(ce) dma_ack <= dphase;
-
 	/* Other ORed SCSI signals */
 	wire scsi_sel = icr[`ICR_A_SEL];
 	wire scsi_rst = icr[`ICR_A_RST];
 	wire scsi_ack = icr[`ICR_A_ACK] | dma_ack;
 	wire scsi_atn = icr[`ICR_A_ATN];
-/*
-	wire scsi_cd  = scsi2_cd;
-	wire scsi_io  = scsi2_io;
-	wire scsi_msg = scsi2_msg;
-	wire scsi_req = scsi2_req;
-	
-	assign din = scsi2_dout;
 
-	assign io_lba      = io_lba_2;
-	assign sd_buff_din = sd_buff_din_2;
-*/
-	/* Other trivial lines set by target */
+	/* Mux target signals */
+	reg scsi_cd, scsi_io, scsi_msg, scsi_req;
 
-	wire scsi_cd  = (scsi2_bsy) ? scsi2_cd : scsi6_cd;
-	wire scsi_io  = (scsi2_bsy) ? scsi2_io : scsi6_io;
-	wire scsi_msg = (scsi2_bsy) ? scsi2_msg : scsi6_msg;
-	wire scsi_req = (scsi2_bsy) ? scsi2_req : scsi6_req;
+	always begin
+		integer i;
+		scsi_cd = 0;
+		scsi_io = 0;
+		scsi_msg = 0;
+		scsi_req = 0;
+		din = 8'h55;
+		io_lba = 0;
+		sd_buff_din = 0;
 
-	assign din = scsi2_bsy ? scsi2_dout : 
-	             scsi6_bsy ? scsi6_dout : 
-	             8'h55;
+		for (i = 0; i < DEVS; i = i + 1) begin
+			if (target_bsy[i]) begin
+				scsi_cd = target_cd[i];
+				scsi_io = target_io[i];
+				scsi_msg = target_msg[i];
+				scsi_req = target_req[i];
+				din = target_dout[i];
+				io_lba = target_lba[i];
+				sd_buff_din = target_buff_din[i];
+			end
+		end
+	end
 
-	// input signals from target 2
-	wire scsi2_bsy, scsi2_msg, scsi2_io, scsi2_cd, scsi2_req;
-	wire [7:0] scsi2_dout;
+	// input signals from targets
+	wire [DEVS-1:0] target_bsy;
+	wire [DEVS-1:0] target_msg;
+	wire [DEVS-1:0] target_io;
+	wire [DEVS-1:0] target_cd;
+	wire [DEVS-1:0] target_req;
+	wire      [7:0] target_dout[DEVS];
+	wire     [31:0] target_lba[DEVS];
+	wire     [15:0] target_buff_din[DEVS];
 
-	// connect a target
-	scsi #(.ID(2)) scsi2
-	(
-		.clk    ( clk ),
-		.rst    ( scsi_rst ),
-		.sel    ( scsi_sel ),
-		.atn    ( scsi_atn ),
-		
-		.ack    ( scsi_ack ),
-		
-		.bsy    ( scsi2_bsy ),
-		.msg    ( scsi2_msg ),
-		.cd     ( scsi2_cd ),
-		.io     ( scsi2_io ),
-		.req    ( scsi2_req ),
-		.dout   ( scsi2_dout ),
-		
-		.din    ( dout ),
+	generate
+		genvar i;
+		for (i = 0; i < DEVS; i = i + 1) begin : target
+			// connect a target
+			scsi #(.ID(3'd6 - i[2:0])) target
+			(
+				.clk    ( clk ),
+				.rst    ( scsi_rst ),
+				.sel    ( scsi_sel ),
+				.atn    ( scsi_atn ),
 
-		// connection to io controller to read and write sectors
-		// to sd card
-		.img_mounted(img_mounted[1]),
-		.img_blocks(img_size[31:9]),
-		.io_lba ( io_lba1 ),
-		.io_rd  ( io_rd[1] ),
-		.io_wr  ( io_wr[1] ),
-		.io_ack ( io_ack[1] ),
+				.ack    ( scsi_ack ),
 
-		.sd_buff_addr( sd_buff_addr ),
-		.sd_buff_dout( sd_buff_dout ),
-		.sd_buff_din( sd_buff_din1 ),
-		.sd_buff_wr( sd_buff_wr )
-	);
+				.bsy    ( target_bsy[i]  ),
+				.msg    ( target_msg[i]  ),
+				.cd     ( target_cd[i]   ),
+				.io     ( target_io[i]   ),
+				.req    ( target_req[i]  ),
+				.dout   ( target_dout[i] ),
 
+				.din    ( dout ),
 
-	// input signals from target 6
-	wire scsi6_bsy, scsi6_msg, scsi6_io, scsi6_cd, scsi6_req;
-	wire [7:0] scsi6_dout;
-	
-	scsi #(.ID(6)) scsi6
-	(
-		.clk    ( clk ) ,           // input  clk
-		.rst    ( scsi_rst ) ,      // input  rst
-		.sel    ( scsi_sel ) ,      // input  sel
-		.atn    ( scsi_atn ) ,      // input  atn
-		
-		.ack    ( scsi_ack ) ,      // input  ack
-		
-		.bsy    ( scsi6_bsy ) ,     // output  bsy
-		.msg    ( scsi6_msg ) ,     // output  msg
-		.cd     ( scsi6_cd ) ,      // output  cd
-		.io     ( scsi6_io ) ,      // output  io
-		.req    ( scsi6_req ) ,     // output  req
-		.dout   ( scsi6_dout ) ,    // output [7:0] dout
+				// connection to io controller to read and write sectors
+				// to sd card
+				.img_mounted(img_mounted[i]),
+				.img_blocks(img_size),
+				.io_lba ( target_lba[i] ),
+				.io_rd  ( io_rd[i] ),
+				.io_wr  ( io_wr[i] ),
+				.io_ack ( io_ack[i] & target_bsy[i] ),
 
-		.din    ( dout ) ,          // input [7:0] din
-
-		// connection to io controller to read and write sectors
-		// to sd card
-		.img_mounted( img_mounted[0] ),
-		.img_blocks( img_size[31:9] ),
-		.io_lba	( io_lba0 ) ,		// output [31:0] io_lba
-		.io_rd	( io_rd[0] ) ,		// output  io_rd
-		.io_wr	( io_wr[0] ) ,		// output  io_wr
-		.io_ack	( io_ack[0] ) ,		// input  io_ack
-
-		.sd_buff_addr( sd_buff_addr ) ,	// input [8:0] sd_buff_addr
-		.sd_buff_dout( sd_buff_dout ) ,	// input [7:0] sd_buff_dout
-		.sd_buff_din( sd_buff_din0 ) ,	// output [7:0] sd_buff_din
-		.sd_buff_wr( sd_buff_wr ) 	// input  sd_buff_wr
-	);
-
+				.sd_buff_addr( sd_buff_addr ),
+				.sd_buff_dout( sd_buff_dout ),
+				.sd_buff_din( target_buff_din[i] ),
+				.sd_buff_wr( sd_buff_wr & target_bsy[i] )
+			);
+		end
+	endgenerate
 
 endmodule

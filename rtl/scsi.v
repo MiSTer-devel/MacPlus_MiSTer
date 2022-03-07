@@ -1,5 +1,4 @@
 /* verilator lint_off UNUSED */
-/* verilator lint_off SYNCASYNCNET */
 
 // scsi.v
 // implements a target only scsi device
@@ -26,45 +25,73 @@ module scsi
 
 	// interface to io controller
 	input         img_mounted,
-	input  [23:0] img_blocks,
+	input  [31:0] img_blocks,
 	output [31:0] io_lba,
 	output reg 	  io_rd,
 	output reg 	  io_wr,
 	input         io_ack,
 
-	input       [7:0] sd_buff_addr,
-	input      [15:0] sd_buff_dout,
-	output reg [15:0] sd_buff_din,
-	input             sd_buff_wr
+	input   [7:0] sd_buff_addr,
+	input  [15:0] sd_buff_dout,
+	output [15:0] sd_buff_din,
+	input         sd_buff_wr
 );
 
-   
 // SCSI device id
-parameter [7:0] ID = 0; 
+parameter [2:0] ID = 0;
 
-`define PHASE_IDLE        3'd0
-`define PHASE_CMD_IN      3'd1
-`define PHASE_DATA_OUT    3'd2
-`define PHASE_DATA_IN     3'd3
-`define PHASE_STATUS_OUT  3'd4
-`define PHASE_MESSAGE_OUT 3'd5
+localparam PHASE_IDLE        = 3'd0;
+localparam PHASE_CMD_IN      = 3'd1;
+localparam PHASE_DATA_OUT    = 3'd2;
+localparam PHASE_DATA_IN     = 3'd3;
+localparam PHASE_STATUS_OUT  = 3'd4;
+localparam PHASE_MESSAGE_OUT = 3'd5;
 reg [2:0]  phase;
 
-// ---------------- buffer read engine -----------------------
-// the buffer itself. Can hold one sector
-reg [7:0] buffer_out0 [256];
-always @(posedge clk) sd_buff_din[7:0] <= buffer_out0[sd_buff_addr];
+// ------------ sector buffer IO controller read/write -----------------------
+// the buffer itself. Can hold two sectors
+reg sd_buff_sel;
 
-reg [7:0] buffer_out1 [256];
-always @(posedge clk) sd_buff_din[15:8] <= buffer_out1[sd_buff_addr];
+wire [7:0] buffer0_dout;
+scsi_dpram buffer0
+(
+	.clock(clk),
 
-// ---------------- buffer write engine ----------------------
-// the buffer itself. Can hold one sector
-reg [7:0] buffer_in0 [256];
-always @(posedge clk) if(sd_buff_wr & io_ack) buffer_in0[sd_buff_addr] <= sd_buff_dout[7:0];
+	.address_a({sd_buff_sel, sd_buff_addr}),
+	.data_a(sd_buff_dout[7:0]),
+	.wren_a(sd_buff_wr),
+	.q_a(sd_buff_din[7:0]),
 
-reg [7:0] buffer_in1 [256];
-always @(posedge clk) if(sd_buff_wr & io_ack) buffer_in1[sd_buff_addr] <= sd_buff_dout[15:8];
+	.address_b(data_cnt[9:1]),
+	.data_b(din),
+	.wren_b(buffer0_wr),
+	.q_b(buffer0_dout)
+);
+
+wire [7:0] buffer1_dout;
+scsi_dpram buffer1
+(
+	.clock(clk),
+
+	.address_a({sd_buff_sel, sd_buff_addr}),
+	.data_a(sd_buff_dout[15:8]),
+	.wren_a(sd_buff_wr),
+	.q_a(sd_buff_din[15:8]),
+
+	.address_b(data_cnt[9:1]),
+	.data_b(din),
+	.wren_b(buffer1_wr),
+	.q_b(buffer1_dout)
+);
+
+reg old_io_ack;
+always @(posedge clk) begin
+	old_io_ack <= io_ack;
+	if (phase == PHASE_IDLE)
+		sd_buff_sel <= 0;
+	else
+		if (old_io_ack & ~io_ack) sd_buff_sel <= !sd_buff_sel;
+end
 
 // -----------------------------------------------------------
 
@@ -77,20 +104,25 @@ reg [7:0]  status;
 `define MSG_CMD_COMPLETE 8'h00
 	
 // drive scsi signals according to phase
-assign msg = (phase == `PHASE_MESSAGE_OUT);
-assign cd = (phase == `PHASE_CMD_IN) || (phase == `PHASE_STATUS_OUT) || (phase == `PHASE_MESSAGE_OUT);
-assign io = (phase == `PHASE_DATA_OUT) || (phase == `PHASE_STATUS_OUT) || (phase == `PHASE_MESSAGE_OUT);
-assign req = (phase != `PHASE_IDLE) && !ack && !io_rd && !io_wr && !io_ack; 
-assign bsy = (phase != `PHASE_IDLE);
+assign msg = (phase == PHASE_MESSAGE_OUT);
+assign cd = (phase == PHASE_CMD_IN) || (phase == PHASE_STATUS_OUT) || (phase == PHASE_MESSAGE_OUT);
+assign io = (phase == PHASE_DATA_OUT) || (phase == PHASE_STATUS_OUT) || (phase == PHASE_MESSAGE_OUT);
 
-assign dout = (phase == `PHASE_STATUS_OUT)?status:
-	 (phase == `PHASE_MESSAGE_OUT)?`MSG_CMD_COMPLETE:
-	 (phase == `PHASE_DATA_OUT)?cmd_dout:
+wire   io_busy = (phase == PHASE_DATA_OUT && (io_rd | io_ack) && data_cnt[9] == sd_buff_sel) ||
+                 (phase == PHASE_DATA_IN  && (io_wr | io_ack) && data_cnt[9] == sd_buff_sel) ||
+                 (phase != PHASE_DATA_OUT && phase != PHASE_DATA_IN && (io_rd | io_wr | io_ack));
+assign req = (phase != PHASE_IDLE) && !ack && !io_busy;
+
+assign bsy = (phase != PHASE_IDLE);
+
+assign dout = (phase == PHASE_STATUS_OUT)?status:
+	 (phase == PHASE_MESSAGE_OUT)?`MSG_CMD_COMPLETE:
+	 (phase == PHASE_DATA_OUT)?cmd_dout:
 	 8'h00;
 
 // de-multiplex different data sources
 wire [7:0] cmd_dout =
-		cmd_read?buffer_dout:
+		cmd_read?(data_cnt[0] ? buffer1_dout : buffer0_dout):
 		cmd_inquiry?inquiry_dout:
 		cmd_read_capacity?read_capacity_dout:
 		cmd_mode_sense?mode_sense_dout:
@@ -112,23 +144,30 @@ wire [7:0] inquiry_dout =
 
 		(data_cnt == 32'd26)?"S":(data_cnt == 32'd27)?"T":
 		(data_cnt == 32'd28)?"2":(data_cnt == 32'd29)?"2":
-		(data_cnt == 32'd30)?"5":(data_cnt == 32'd31)?"N" + ID:	// TESTING. ElectronAsh.
+		(data_cnt == 32'd30)?"5":(data_cnt == 32'd31)?"N" + {5'd0, ID}: // TESTING. ElectronAsh.
 		8'h00;
 
 // output of read capacity command
 //wire [31:0] capacity = 32'd41056;   // 40960 + 96 blocks = 20MB
 //wire [31:0] capacity = 32'd1024096;   // 1024000 + 96 blocks = 500MB
 reg [31:0] capacity;
+reg        mounted = 0;
 always @(posedge clk) begin
-	if (img_mounted) capacity <= img_blocks + 8'd96;
+	if (img_mounted) begin
+		if (|img_blocks) begin
+			capacity <= img_blocks;
+			$display("Image mounted on target %d, size: %d", ID, img_blocks);
+			mounted <= 1;
+		end else
+			mounted <= 0;
+	end
 end
 
-wire [31:0] capacity_m1 = capacity - 32'd1;
 wire [7:0] read_capacity_dout =
-		(data_cnt == 32'd0 )?capacity_m1[31:24]:
-		(data_cnt == 32'd1 )?capacity_m1[23:16]:
-		(data_cnt == 32'd2 )?capacity_m1[15:8]:
-		(data_cnt == 32'd3 )?capacity_m1[7:0]:
+		(data_cnt == 32'd0 )?capacity[31:24]:
+		(data_cnt == 32'd1 )?capacity[23:16]:
+		(data_cnt == 32'd2 )?capacity[15:8]:
+		(data_cnt == 32'd3 )?capacity[7:0]:
 		(data_cnt == 32'd6 )?8'd2:             // 512 bytes per sector
 		8'h00;
 
@@ -140,40 +179,44 @@ wire [7:0] mode_sense_dout =
 		(data_cnt == 32'd10 )?8'd2:
 		8'h00;
 
-// clock data out of buffer to allow for embedded ram
-reg [7:0] buffer_dout;
-always @(posedge clk) buffer_dout <= data_cnt[0] ? buffer_in1[data_cnt[8:1]] : buffer_in0[data_cnt[8:1]];
-
 // buffer to store incoming commands
 reg [3:0]  cmd_cnt;
 reg [7:0]  cmd [9:0];
 
 /* ----------------------- request data from/to io controller ----------------------- */
 
-// base address of current block. Subtract one when writing since the writing happens
-// after a block has been transferred and data_cnt has thus already been increased by 512
-assign io_lba = lba + { 9'd0, data_cnt[31:9] } -
-		(cmd_write ? 32'd1 : 32'd0);
+assign io_lba = lba;
 
-wire req_rd = ((phase == `PHASE_DATA_OUT) && cmd_read && (data_cnt[8:0] == 0) && !data_complete);
-wire req_wr = ((((phase == `PHASE_DATA_IN) && (data_cnt[8:0] == 0) && (data_cnt != 0)) || (phase == `PHASE_STATUS_OUT)) && cmd_write);
+// generate an io_rd signal whenever the first byte of a 512 byte block is required
+// start fetching the next sector when the 20th byte is read, and it's not the last sector
+wire req_rd = ((phase == PHASE_DATA_OUT) && cmd_read && (data_cnt == 0 || (data_cnt[8:0] == 9'd20 && data_cnt[31:9] != ({7'd0, tlen} - 1'd1))) && !data_complete);
+
+// generate an io_wr signal whenever a 512 byte block has been received or when the status
+// phase of a write command has been reached
+wire req_wr = ((((phase == PHASE_DATA_IN) && (data_cnt[8:0] == 0) && (data_cnt != 0)) || (phase == PHASE_STATUS_OUT)) && cmd_write);
+
 always @(posedge clk) begin
 	reg old_rd, old_wr;
+	reg wr_pending, rd_pending;
 
 	old_rd <= req_rd;
 	old_wr <= req_wr;
-	
+	if(~old_rd & req_rd) rd_pending <= 1;
+	if(~old_wr & req_wr) wr_pending <= 1;
+
 	if(io_ack) begin
 		io_rd <= 1'b0;
 		io_wr <= 1'b0;
 	end else begin
-		// generate an io_rd signal whenever the first byte of a 512 byte block is required and io_wr whenever
-		// the last byte of a 512 byte block has been revceived
-		if(~old_rd & req_rd) io_rd <= 1;
+		if (rd_pending && !io_rd) begin
+			io_rd <= 1;
+			rd_pending <= 0;
+		end
 
-		// generate an io_wr signal whenever a 512 byte block has been received or when the status
-		// phase of a write command has been reached
-		if(~old_wr & req_wr) io_wr <= 1;
+		if (wr_pending && !io_wr) begin
+			io_wr <= 1;
+			wr_pending <= 0;
+		end
 	end
 end
 
@@ -187,21 +230,25 @@ always @(posedge clk) begin
 	stb_adv <= (old_ack & ~ack); // on falling edge
 end
 
+reg buffer0_wr, buffer1_wr;
+
 // store data on rising edge of ack, ...
 always @(posedge clk) begin
+	buffer0_wr <= 0;
+	buffer1_wr <= 0;
 	if(stb_ack) begin
-		if(phase == `PHASE_CMD_IN)  cmd[cmd_cnt] <= din;
-		if(phase == `PHASE_DATA_IN) begin
-			if(data_cnt[0]) buffer_out1[data_cnt[8:1]] <= din;
-			else            buffer_out0[data_cnt[8:1]] <= din;
+		if(phase == PHASE_CMD_IN)  cmd[cmd_cnt] <= din;
+		if(phase == PHASE_DATA_IN) begin
+			buffer0_wr <= ~data_cnt[0];
+			buffer1_wr <=  data_cnt[0];
 		end
 	end
 end
 
 // ... advance counter on falling edge
 always @(posedge clk) begin
-	if(phase == `PHASE_IDLE) cmd_cnt <= 4'd0;
-	else if(stb_adv && (phase == `PHASE_CMD_IN) && (cmd_cnt != 15)) cmd_cnt <= cmd_cnt + 4'd1;
+	if(phase == PHASE_IDLE) cmd_cnt <= 4'd0;
+	else if(stb_adv && (phase == PHASE_CMD_IN) && (cmd_cnt != 15)) cmd_cnt <= cmd_cnt + 4'd1;
 end
 
 // count data bytes. don't increase counter while we are waiting for data from
@@ -221,7 +268,7 @@ wire [31:0] data_len =
 		 { 16'd0, tlen };                 // inquiry etc have length in bytes
 
 always @(posedge clk) begin
-	if((phase != `PHASE_DATA_OUT) && (phase != `PHASE_DATA_IN) && (phase != `PHASE_STATUS_OUT) && (phase != `PHASE_MESSAGE_OUT)) begin
+	if((phase != PHASE_DATA_OUT) && (phase != PHASE_DATA_IN) && (phase != PHASE_STATUS_OUT) && (phase != PHASE_MESSAGE_OUT)) begin
 		data_cnt <= 0;
 		data_complete <= 0;
 	end else begin	
@@ -235,14 +282,14 @@ end
 // check whether status byte has been sent
 reg status_sent;
 always @(posedge clk) begin
-	if(phase != `PHASE_STATUS_OUT) status_sent <= 0;
+	if(phase != PHASE_STATUS_OUT) status_sent <= 0;
 	else if(stb_adv) status_sent <= 1;
 end
 
 // check whether message byte has been sent
 reg message_sent;
 always @(posedge clk) begin
-	if(phase != `PHASE_MESSAGE_OUT) message_sent <= 0;
+	if(phase != PHASE_MESSAGE_OUT) message_sent <= 0;
 	else if(stb_adv) message_sent <= 1;
 end
 
@@ -273,18 +320,21 @@ wire       cmd_test_unit_ready = (op_code == 8'h00);
 wire       cmd_read_capacity = (op_code == 8'h25);
 wire       cmd_read_buffer = (op_code == 8'h3b);  // fake
 wire       cmd_write_buffer = (op_code == 8'h3c); // fake
+wire       cmd_verify6 = (op_code == 8'h13); // fake
+wire       cmd_verify10 = (op_code == 8'h2f); // fake
 
 // valid command in buffer? TODO: check for valid command parameters
 wire  cmd_ok = cmd_read || cmd_write || cmd_inquiry || cmd_test_unit_ready || 
 		  cmd_read_capacity || cmd_mode_select || cmd_format || cmd_mode_sense ||
-		  cmd_read_buffer | cmd_write_buffer;
+		  cmd_read_buffer || cmd_write_buffer || cmd_verify6 || cmd_verify10;
 
 // latch parameters once command is complete
 reg [31:0] lba;
 reg [15:0] tlen;
 
 always @(posedge clk) begin
-	if(cmd_cpl && (phase == `PHASE_CMD_IN)) begin
+	if (old_io_ack & ~io_ack) lba <= lba + 1'd1;
+	if(cmd_cpl && (phase == PHASE_CMD_IN)) begin
 		lba <= cmd6_cpl?{11'd0, lba6}:lba10;
 		tlen <= cmd6_cpl?{7'd0, tlen6}:tlen10;
 	end
@@ -304,16 +354,17 @@ wire [15:0] tlen10 = { cmd[7], cmd[8] };
 // on the rising edge
 always @(posedge clk) begin
 	if(rst) begin
-		phase <= `PHASE_IDLE;
+		phase <= PHASE_IDLE;
 	end else begin
-		if(phase == `PHASE_IDLE) begin
-			if(sel && din[ID])  // own id on bus during selection?
-				phase <= `PHASE_CMD_IN;
+		if(phase == PHASE_IDLE) begin
+			if(sel && din[ID] && mounted)  // own id on bus during selection?
+				phase <= PHASE_CMD_IN;
 		end
 
-		else if(phase == `PHASE_CMD_IN) begin
+		else if(phase == PHASE_CMD_IN) begin
 			// check if a full command is in the buffer
 			if(cmd_cpl) begin
+				$display("New command on target %d: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x", ID, cmd[0], cmd[1], cmd[2], cmd[3], cmd[4], cmd[5], cmd[6], cmd[7], cmd[8], cmd[9]);
 				// is this a supported and valid command?
 				if(cmd_ok) begin
 					// yes, continue
@@ -322,39 +373,76 @@ always @(posedge clk) begin
 					// continue according to command
 
 					// these commands return data
-					if(cmd_read || cmd_inquiry || cmd_read_capacity || cmd_mode_sense || cmd_read_buffer) phase <= `PHASE_DATA_OUT;
+					if(cmd_read || cmd_inquiry || cmd_read_capacity || cmd_mode_sense || cmd_read_buffer) phase <= PHASE_DATA_OUT;
 					// these commands receive dataa
-					else if(cmd_write || cmd_mode_select || cmd_write_buffer) phase <= `PHASE_DATA_IN;
+					else if(cmd_write || cmd_mode_select || cmd_write_buffer) phase <= PHASE_DATA_IN;
 					// and all other valid commands are just "ok"
-					else phase <= `PHASE_STATUS_OUT;
+					else phase <= PHASE_STATUS_OUT;
 				end else begin
 					// no, report failure
 					status <= `STATUS_CHECK_CONDITION;
-					phase <= `PHASE_STATUS_OUT;
+					phase <= PHASE_STATUS_OUT;
 				end
 			end
 		end
 
-		else if(phase == `PHASE_DATA_OUT) begin
-			if(data_complete) phase <= `PHASE_STATUS_OUT;
+		else if(phase == PHASE_DATA_OUT) begin
+			if(data_complete) phase <= PHASE_STATUS_OUT;
 		end
 
-		else if(phase == `PHASE_DATA_IN) begin
-			if(data_complete) phase <= `PHASE_STATUS_OUT;
+		else if(phase == PHASE_DATA_IN) begin
+			if(data_complete) phase <= PHASE_STATUS_OUT;
 		end
 
-		else if(phase == `PHASE_STATUS_OUT) begin
-			if(status_sent) phase <= `PHASE_MESSAGE_OUT;
+		else if(phase == PHASE_STATUS_OUT) begin
+			if(status_sent) phase <= PHASE_MESSAGE_OUT;
 		end
 
-		else if(phase == `PHASE_MESSAGE_OUT) begin
-			if(message_sent) phase <= `PHASE_IDLE;
+		else if(phase == PHASE_MESSAGE_OUT) begin
+			if(message_sent) phase <= PHASE_IDLE;
 		end
 		
 		else
-			phase <= `PHASE_IDLE;  // should never happen
+			phase <= PHASE_IDLE;  // should never happen
 	end
 end
    
    
+endmodule
+
+module scsi_dpram #(parameter DATAWIDTH=8, ADDRWIDTH=9)
+(
+	input	                clock,
+
+	input	[ADDRWIDTH-1:0] address_a,
+	input	[DATAWIDTH-1:0] data_a,
+	input	                wren_a,
+	output reg [DATAWIDTH-1:0] q_a,
+
+	input	[ADDRWIDTH-1:0] address_b,
+	input	[DATAWIDTH-1:0] data_b,
+	input	                wren_b,
+	output reg [DATAWIDTH-1:0] q_b
+);
+
+reg [DATAWIDTH-1:0] ram[0:(1<<ADDRWIDTH)-1];
+
+always @(posedge clock) begin
+	if(wren_a) begin
+		ram[address_a] <= data_a;
+		q_a <= data_a;
+	end else begin
+		q_a <= ram[address_a];
+	end
+end
+
+always @(posedge clock) begin
+	if(wren_b) begin
+		ram[address_b] <= data_b;
+		q_b <= data_b;
+	end else begin
+		q_b <= ram[address_b];
+	end
+end
+
 endmodule
