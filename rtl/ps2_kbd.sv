@@ -89,52 +89,43 @@ wire pop_key = (cmd_instant & tick_short) | (inquiry_active & tick_long) | (inqu
 assign strobe_in = ((cmd_model | cmd_test) & tick_short) | pop_key;	
 
 /* Data to Mac */
-assign data_in = cmd_test 	? 8'h7d :
-		 cmd_model	? 8'h03 :
-		 key_pending ? (keymac[8] ? 8'h79 : keymac[7:0]) : 
-		 8'h7b;	
+assign data_in = cmd_test 	  ? 8'h7d :
+		           cmd_model	  ? 8'h03 :
+		           key_pending ? (keymac[8] ? 8'h79 : keymac[7:0]) : 
+		                         8'h7b;	
 
-wire depress  = ~ps2_key[9];
-wire extended = ps2_key[8];
-wire ignore_capslock = {extended,ps2_key[7:0]} == 9'h058 && capslock;
+wire press        = ps2_key[9];
+wire capslock_key = (ps2_key[8:0] == 'h58);
 
 /* Handle key_pending, and multi-byte keypad responses */
 always @(posedge clk) begin
 	reg old_stb;
 
-	if (reset) begin
-		key_pending <= 0;
+	if(ce) begin
 		old_stb <= ps2_key[10];
-		capslock <= 0;
-	end
-	else if(ce) begin
-		if (cmd_model | cmd_test) key_pending <= 0;
-		else if (pop_key) begin
-			if (keymac[8]) keymac[8] <= 0;
-			else key_pending <= 0;
-		end else begin
-	
-			old_stb <= ps2_key[10];
-			if(old_stb != ps2_key[10]) begin
-
-				/* Capslock handling */
-				if(ps2_key[7:0] == 8'h58 && !extended && !depress) capslock <= ~capslock;
-				
-				if(!key_pending && !ignore_capslock) begin
-					key_pending <= 1;
-					keymac <= {key_code[8],depress,key_code[6:0]};
-				end
+		if(old_stb != ps2_key[10]) begin
+			/* Capslock handling */
+			if(capslock_key && press) capslock <= ~capslock;
+			
+			if(!key_pending && !(capslock_key && capslock)) begin
+				key_pending <= 1;
+				keymac <= {key_code[8],~press,key_code[6:0]};
 			end
 		end
+		
+		if (pop_key) begin
+			if (keymac[8]) keymac[8] <= 0;
+			else key_pending <= 0;
+		end
 	end
+	
+	if (cmd_model | cmd_test | reset) key_pending <= 0;
+	if (reset) capslock <= 0;
 end
 
 
 //use BRAM for table
-wire [8:0] key_code = code[key_addr];
-reg  [8:0] key_addr;
-always @(posedge clk) key_addr <= {extended,ps2_key[7:0]};
-
+wire [8:0] key_code = code[ps2_key[8:0]];
 wire [8:0] code[512] =
 '{
 	/* 000 */ 9'h07b,
