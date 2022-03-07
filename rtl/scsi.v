@@ -61,10 +61,10 @@ always @(posedge clk) sd_buff_din[15:8] <= buffer_out1[sd_buff_addr];
 // ---------------- buffer write engine ----------------------
 // the buffer itself. Can hold one sector
 reg [7:0] buffer_in0 [256];
-always @(posedge clk) if(sd_buff_wr) buffer_in0[sd_buff_addr] <= sd_buff_dout[7:0];
+always @(posedge clk) if(sd_buff_wr & io_ack) buffer_in0[sd_buff_addr] <= sd_buff_dout[7:0];
 
 reg [7:0] buffer_in1 [256];
-always @(posedge clk) if(sd_buff_wr) buffer_in1[sd_buff_addr] <= sd_buff_dout[15:8];
+always @(posedge clk) if(sd_buff_wr & io_ack) buffer_in1[sd_buff_addr] <= sd_buff_dout[15:8];
 
 // -----------------------------------------------------------
 

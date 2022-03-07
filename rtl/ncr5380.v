@@ -65,15 +65,16 @@ module ncr5380
 	input   [1:0] img_mounted,
 	input  [31:0] img_size,
 	
-	output [15:0] io_req_type,
-	output [31:0] io_lba,
+	output [31:0] io_lba0,
+	output [31:0] io_lba1,
 	output  [1:0] io_rd,
 	output  [1:0] io_wr,
-	input 	     io_ack,
+	input   [1:0] io_ack,
 
 	input   [7:0] sd_buff_addr,
 	input  [15:0] sd_buff_dout,
-	output [15:0] sd_buff_din,
+	output [15:0] sd_buff_din0,
+	output [15:0] sd_buff_din1,
 	input         sd_buff_wr
 );
 
@@ -278,16 +279,9 @@ module ncr5380
 	             scsi6_bsy ? scsi6_dout : 
 	             8'h55;
 
-	assign io_lba      = (scsi2_bsy) ? io_lba_2 : io_lba_6;
-	assign sd_buff_din = (scsi2_bsy) ? sd_buff_din_2 : sd_buff_din_6;
-	assign io_req_type = 16'h0000;	// Not used atm. Could be used for CD-ROM sector requests later. ElectronAsh.
-
 	// input signals from target 2
 	wire scsi2_bsy, scsi2_msg, scsi2_io, scsi2_cd, scsi2_req;
 	wire [7:0] scsi2_dout;
-
-	wire [31:0] io_lba_2;
-	wire [15:0] sd_buff_din_2;
 
 	// connect a target
 	scsi #(.ID(2)) scsi2
@@ -312,15 +306,15 @@ module ncr5380
 		// to sd card
 		.img_mounted(img_mounted[1]),
 		.img_blocks(img_size[31:9]),
-		.io_lba ( io_lba_2 ),
+		.io_lba ( io_lba1 ),
 		.io_rd  ( io_rd[1] ),
 		.io_wr  ( io_wr[1] ),
-		.io_ack ( io_ack & scsi2_bsy ),
+		.io_ack ( io_ack[1] ),
 
 		.sd_buff_addr( sd_buff_addr ),
 		.sd_buff_dout( sd_buff_dout ),
-		.sd_buff_din( sd_buff_din_2 ),
-		.sd_buff_wr( sd_buff_wr & scsi2_bsy )
+		.sd_buff_din( sd_buff_din1 ),
+		.sd_buff_wr( sd_buff_wr )
 	);
 
 
@@ -328,9 +322,6 @@ module ncr5380
 	wire scsi6_bsy, scsi6_msg, scsi6_io, scsi6_cd, scsi6_req;
 	wire [7:0] scsi6_dout;
 	
-	wire [31:0] io_lba_6;
-	wire [15:0] sd_buff_din_6;
-
 	scsi #(.ID(6)) scsi6
 	(
 		.clk    ( clk ) ,           // input  clk
@@ -353,15 +344,15 @@ module ncr5380
 		// to sd card
 		.img_mounted( img_mounted[0] ),
 		.img_blocks( img_size[31:9] ),
-		.io_lba	( io_lba_6 ) ,		// output [31:0] io_lba
+		.io_lba	( io_lba0 ) ,		// output [31:0] io_lba
 		.io_rd	( io_rd[0] ) ,		// output  io_rd
 		.io_wr	( io_wr[0] ) ,		// output  io_wr
-		.io_ack	( io_ack & scsi6_bsy ) ,		// input  io_ack
+		.io_ack	( io_ack[0] ) ,		// input  io_ack
 
 		.sd_buff_addr( sd_buff_addr ) ,	// input [8:0] sd_buff_addr
 		.sd_buff_dout( sd_buff_dout ) ,	// input [7:0] sd_buff_dout
-		.sd_buff_din( sd_buff_din_6 ) ,	// output [7:0] sd_buff_din
-		.sd_buff_wr( sd_buff_wr & scsi6_bsy ) 	// input  sd_buff_wr
+		.sd_buff_din( sd_buff_din0 ) ,	// output [7:0] sd_buff_din
+		.sd_buff_wr( sd_buff_wr ) 	// input  sd_buff_wr
 	);
 
 

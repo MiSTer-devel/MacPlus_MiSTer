@@ -81,13 +81,15 @@ module dataController_top(
 	// connections to io controller
 	input   [1:0] img_mounted,
 	input  [31:0] img_size,
-	output [31:0] io_lba,
+	output [31:0] io_lba0,
+	output [31:0] io_lba1,
 	output  [1:0] io_rd,
 	output  [1:0] io_wr,
-	input         io_ack,
+	input   [1:0] io_ack,
 	input   [7:0] sd_buff_addr,
 	input  [15:0] sd_buff_dout,
-	output [15:0] sd_buff_din,
+	output [15:0] sd_buff_din0,
+	output [15:0] sd_buff_din1,
 	input         sd_buff_wr
 );
 	
@@ -179,14 +181,16 @@ module dataController_top(
 		// connections to io controller
 		.img_mounted( img_mounted ),
 		.img_size( img_size ),
-		.io_lba ( io_lba ),
+		.io_lba0 ( io_lba0 ),
+		.io_lba1 ( io_lba1 ),
 		.io_rd ( io_rd ),
 		.io_wr ( io_wr ),
 		.io_ack ( io_ack ),
 
 		.sd_buff_addr(sd_buff_addr),
 		.sd_buff_dout(sd_buff_dout),
-		.sd_buff_din(sd_buff_din),
+		.sd_buff_din0(sd_buff_din0),
+		.sd_buff_din1(sd_buff_din1),
 		.sd_buff_wr(sd_buff_wr)
 	);
 
