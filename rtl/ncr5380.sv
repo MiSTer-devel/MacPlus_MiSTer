@@ -64,14 +64,14 @@ module ncr5380
 	input  [DEVS-1:0] img_mounted,
 	input      [31:0] img_size,
 	
-	output reg [31:0] io_lba,
+	output reg [31:0] io_lba[DEVS],
 	output [DEVS-1:0] io_rd,
 	output [DEVS-1:0] io_wr,
 	input  [DEVS-1:0] io_ack,
 
 	input        [7:0] sd_buff_addr,
 	input       [15:0] sd_buff_dout,
-	output  reg [15:0] sd_buff_din,
+	output      [15:0] sd_buff_din[DEVS],
 	input              sd_buff_wr
 );
 	parameter DEVS = 2;
@@ -240,8 +240,6 @@ module ncr5380
 		scsi_msg = 0;
 		scsi_req = 0;
 		din = 8'h55;
-		io_lba = 0;
-		sd_buff_din = 0;
 
 		for (i = 0; i < DEVS; i = i + 1) begin
 			if (target_bsy[i]) begin
@@ -250,8 +248,6 @@ module ncr5380
 				scsi_msg = target_msg[i];
 				scsi_req = target_req[i];
 				din = target_dout[i];
-				io_lba = target_lba[i];
-				sd_buff_din = target_buff_din[i];
 			end
 		end
 	end
@@ -263,8 +259,6 @@ module ncr5380
 	wire [DEVS-1:0] target_cd;
 	wire [DEVS-1:0] target_req;
 	wire      [7:0] target_dout[DEVS];
-	wire     [31:0] target_lba[DEVS];
-	wire     [15:0] target_buff_din[DEVS];
 
 	generate
 		genvar i;
@@ -292,14 +286,14 @@ module ncr5380
 				// to sd card
 				.img_mounted(img_mounted[i]),
 				.img_blocks(img_size),
-				.io_lba ( target_lba[i] ),
+				.io_lba ( io_lba[i] ),
 				.io_rd  ( io_rd[i] ),
 				.io_wr  ( io_wr[i] ),
 				.io_ack ( io_ack[i] & target_bsy[i] ),
 
 				.sd_buff_addr( sd_buff_addr ),
 				.sd_buff_dout( sd_buff_dout ),
-				.sd_buff_din( target_buff_din[i] ),
+				.sd_buff_din( sd_buff_din[i] ),
 				.sd_buff_wr( sd_buff_wr & target_bsy[i] )
 			);
 		end

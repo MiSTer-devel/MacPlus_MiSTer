@@ -2,7 +2,7 @@ set_global_assignment -name QIP_FILE rtl/tg68k/TG68K.qip
 set_global_assignment -name QIP_FILE rtl/fx68k/fx68k.qip
 set_global_assignment -name VERILOG_FILE rtl/sdram.v
 set_global_assignment -name VERILOG_FILE rtl/scsi.v
-set_global_assignment -name VERILOG_FILE rtl/ncr5380.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/ncr5380.sv
 set_global_assignment -name VERILOG_FILE rtl/floppy_track_encoder.v
 set_global_assignment -name VERILOG_FILE rtl/floppy.v
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/ps2_kbd.sv
@@ -14,7 +14,7 @@ set_global_assignment -name VERILOG_FILE rtl/iwm.v
 set_global_assignment -name VHDL_FILE rtl/via6522.vhd
 set_global_assignment -name VERILOG_FILE rtl/addrDecoder.v
 set_global_assignment -name VERILOG_FILE rtl/addrController_top.v
-set_global_assignment -name VERILOG_FILE rtl/dataController_top.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/dataController_top.sv
 set_global_assignment -name VERILOG_FILE rtl/videoTimer.v
 set_global_assignment -name VERILOG_FILE rtl/videoShifter.v
 set_global_assignment -name VERILOG_FILE rtl/rtc.v 

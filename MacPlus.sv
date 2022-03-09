@@ -208,7 +208,7 @@ localparam CONF_STR = {
 	"F2,DSK,Mount Sec Floppy;",
 	"-;",
 	"SC0,IMGVHD,Mount SCSI-6;",
-	"SC1,IMGVHD,Mount SCSI-2;",
+	"SC1,IMGVHD,Mount SCSI-5;",
 	"-;",
 	"O78,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"OBC,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
@@ -263,19 +263,21 @@ end
 
 ///////////////////////////////////////////////////
 
+localparam SCSI_DEVS = 2;
+
 // the status register is controlled by the on screen display (OSD)
 wire [31:0] status;
 wire  [1:0] buttons;
-wire [31:0] sd_lba;
-wire  [1:0] sd_rd;
-wire  [1:0] sd_wr;
-wire  [1:0] sd_ack;
-wire  [7:0] sd_buff_addr;
-wire [15:0] sd_buff_dout;
-wire [15:0] sd_buff_din;
-wire        sd_buff_wr;
-wire  [1:0] img_mounted;
-wire [31:0] img_size;
+wire [31:0] sd_lba[SCSI_DEVS];
+wire  [SCSI_DEVS-1:0] sd_rd;
+wire  [SCSI_DEVS-1:0] sd_wr;
+wire  [SCSI_DEVS-1:0] sd_ack;
+wire            [7:0] sd_buff_addr;
+wire           [15:0] sd_buff_dout;
+wire           [15:0] sd_buff_din[SCSI_DEVS];
+wire                  sd_buff_wr;
+wire  [SCSI_DEVS-1:0] img_mounted;
+wire           [31:0] img_size;
 
 wire        ioctl_write;
 reg         ioctl_wait = 0;
@@ -289,7 +291,7 @@ wire [15:0] ioctl_data;
 
 wire [32:0] TIMESTAMP;
 
-hps_io #(.CONF_STR(CONF_STR), .VDNUM(2), .WIDE(1)) hps_io
+hps_io #(.CONF_STR(CONF_STR), .VDNUM(SCSI_DEVS), .WIDE(1)) hps_io
 (
 	.clk_sys(clk_sys),
 	.HPS_BUS(HPS_BUS),
@@ -297,14 +299,14 @@ hps_io #(.CONF_STR(CONF_STR), .VDNUM(2), .WIDE(1)) hps_io
 	.buttons(buttons),
 	.status(status),
 
-	.sd_lba('{sd_lba,sd_lba}),
+	.sd_lba(sd_lba),
 	.sd_rd(sd_rd),
 	.sd_wr(sd_wr),
 	.sd_ack(sd_ack),
 
 	.sd_buff_addr(sd_buff_addr),
 	.sd_buff_dout(sd_buff_dout),
-	.sd_buff_din('{sd_buff_din,sd_buff_din}),
+	.sd_buff_din(sd_buff_din),
 	.sd_buff_wr(sd_buff_wr),
 	
 	.img_mounted(img_mounted),
@@ -618,7 +620,7 @@ addrController_top ac0
 wire [1:0] diskEject;
 wire [1:0] diskMotor, diskAct;
 
-dataController_top dc0
+dataController_top #(SCSI_DEVS) dc0
 (
 	.clk32(clk_sys), 
 	.clk8_en_p(clk8_en_p),
