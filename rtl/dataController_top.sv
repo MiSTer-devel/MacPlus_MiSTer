@@ -7,6 +7,7 @@ module dataController_top(
 	input E_falling,
 	
 	// system control:
+	input machineType, // 0 - Mac Plus, 1 - Mac SE
 	input _systemReset,
 
 	// 68000 CPU control:
@@ -28,6 +29,7 @@ module dataController_top(
 	input selectSCC,
 	input selectIWM,
 	input selectVIA,
+	input selectSEOverlay,
 	input _cpuVMA,
 	
 	// RAM/ROM:
@@ -210,9 +212,19 @@ module dataController_top(
 	end
 	wire onesec = vblankCount == 59;
 
+	// Mac SE ROM overlay switch
+	reg  SEOverlay;
+	always @(posedge clk32) begin
+		if (!_cpuReset)
+			SEOverlay <= 1;
+		else if (selectSEOverlay)
+			SEOverlay <= 0;
+	end
+
 	// VIA
 	wire [2:0] snd_vol;
 	wire snd_ena;
+	wire driveSel; // internal drive select, 0 - upper, 1 - lower
 
 	wire [7:0] via_pa_i, via_pa_o, via_pa_oe;
 	wire [7:0] via_pb_i, via_pb_o, via_pb_oe;
@@ -223,13 +235,14 @@ module dataController_top(
 	//port A
 	assign via_pa_i = {sccWReq, ~via_pa_oe[6:0] | via_pa_o[6:0]};
 	assign snd_vol = ~via_pa_oe[2:0] | via_pa_o[2:0];
-	assign snd_alt = ~(~via_pa_oe[3] | via_pa_o[3]);
-	assign memoryOverlayOn = ~via_pa_oe[4] | via_pa_o[4];
+	assign snd_alt = machineType ? 1'b0 : ~(~via_pa_oe[3] | via_pa_o[3]);
+	assign driveSel = machineType ? ~via_pa_oe[4] | via_pa_o[4] : 1'b1;
+	assign memoryOverlayOn = machineType ? SEOverlay : ~via_pa_oe[4] | via_pa_o[4];
 	assign SEL = ~via_pa_oe[5] | via_pa_o[5];
 	assign vid_alt = ~via_pa_oe[6] | via_pa_o[6];
 
 	//port B
-	assign via_pb_i = {1'b1, _hblank, mouseY2, mouseX2, mouseButton, 2'b11, rtcdat_o};
+	assign via_pb_i = {1'b1, {3{machineType}} | {_hblank, mouseY2, mouseX2}, machineType ? _ADBint : mouseButton, 2'b11, rtcdat_o};
 	assign snd_ena = ~via_pb_oe[7] | via_pb_o[7];
 
 	assign viaDataOut[7:0] = 8'hEF;
@@ -284,6 +297,11 @@ module dataController_top(
 		.dat_o      (rtcdat_o)
 	);
 
+	wire _ADBint;
+	wire ADBST0 = ~via_pb_oe[4] | via_pb_o[4];
+	wire ADBST1 = ~via_pb_oe[5] | via_pb_o[5];
+	wire ADBListen;
+
 	reg kbdclk;
 	reg [10:0] kbdclk_count;
 	reg kbd_transmitting, kbd_wait_receiving, kbd_receiving;
@@ -301,7 +319,7 @@ module dataController_top(
 		if (clk8_en_p) begin
 			if ((kbd_transmitting && !kbd_wait_receiving) || kbd_receiving) begin
 				kbdclk_count <= kbdclk_count + 1'd1;
-				if (kbdclk_count == 12'd1300) begin // ~165usec
+				if (kbdclk_count == (machineType ? 8'd80 : 12'd1300)) begin // ~165usec - Mac Plus / faster - ADB
 					kbdclk <= ~kbdclk;
 					kbdclk_count <= 0;
 					if (kbdclk) begin 
@@ -320,28 +338,46 @@ module dataController_top(
 	// Keyboard control
 	always @(posedge clk32) begin
 		reg kbdclk_d;
+		reg ADBListenD;
 		if (!_cpuReset) begin
 			kbd_bitcnt <= 0;
 			kbd_transmitting <= 0;
 			kbd_wait_receiving <= 0;
 			kbd_data_valid <= 0;
+			ADBListenD <= 0;
 		end else if (clk8_en_p) begin
-			if (kbd_in_strobe) begin
+			if (kbd_in_strobe && !machineType) begin
 				kbd_to_mac <= kbd_in_data;
 				kbd_data_valid <= 1;
 			end
 
+			if (adb_dout_strobe && machineType) begin
+				kbd_to_mac <= adb_dout;
+				kbd_receiving <= 1;
+			end
+
 			kbd_out_strobe <= 0;
+			adb_din_strobe <= 0;
 			kbdclk_d <= kbdclk;
 
 			// Only the Macintosh can initiate communication over the keyboard lines. On
 			// power-up of either the Macintosh or the keyboard, the Macintosh is in
 			// charge, and the external device is passive. The Macintosh signals that it's
 			// ready to begin communication by pulling the keyboard data line low.
-			if (!kbd_transmitting && !kbd_receiving && !kbddat_i) begin
+			if (!machineType && !kbd_transmitting && !kbd_receiving && !kbddat_i) begin
 				kbd_transmitting <= 1;
 				kbd_bitcnt <= 0;
 			end
+
+			// ADB transmission start
+			if (machineType && !kbd_transmitting && !kbd_receiving) begin
+				ADBListenD <= ADBListen;
+				if (!ADBListenD && ADBListen) begin
+					kbd_transmitting <= 1;
+					kbd_bitcnt <= 0;
+				end
+			end
+
 			// The last bit of the command leaves the keyboard data line low; the
 			// Macintosh then indicates it's ready to receive the keyboard's response by
 			// setting the data line high. 
@@ -357,8 +393,14 @@ module dataController_top(
 
 				if (kbd_bitcnt == 3'd7) begin
 					if (kbd_transmitting) begin
-						kbd_out_strobe <= 1;
-						kbd_wait_receiving <= 1;
+						if (!machineType) begin
+							kbd_out_strobe <= 1;
+							kbd_wait_receiving <= 1;
+						end else begin
+							adb_din_strobe <= 1;
+							adb_din <= kbd_out_data;
+							kbd_transmitting <= 0;
+						end
 					end
 					if (kbd_receiving) begin
 						kbd_receiving <= 0;
@@ -381,6 +423,7 @@ module dataController_top(
 		.dataIn(cpuDataIn),
 		.cpuAddrRegHi(cpuAddrRegHi),
 		.SEL(SEL),
+		.driveSel(driveSel),
 		.dataOut(iwmDataOut),
 		.insertDisk(insertDisk),
 		.diskSides(diskSides),
@@ -456,4 +499,26 @@ module dataController_top(
 		.capslock(capslock)
 		);
 		
+	reg  [7:0] adb_din;
+	reg        adb_din_strobe;
+	wire [7:0] adb_dout;
+	wire       adb_dout_strobe;
+
+	adb adb(
+		.clk(clk32),
+		.clk_en(clk8_en_p),
+		.reset(~_cpuReset),
+		.st({ADBST1, ADBST0}),
+		._int(_ADBint),
+		.viaBusy(kbd_transmitting || kbd_receiving),
+		.listen(ADBListen),
+		.adb_din(adb_din),
+		.adb_din_strobe(adb_din_strobe),
+		.adb_dout(adb_dout),
+		.adb_dout_strobe(adb_dout_strobe),
+
+		.ps2_mouse(ps2_mouse),
+		.ps2_key(ps2_key)
+	);
+
 endmodule

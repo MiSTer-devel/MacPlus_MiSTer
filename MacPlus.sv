@@ -213,6 +213,7 @@ localparam CONF_STR = {
 	"O78,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"OBC,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
 	"-;",
+	"O9,Model,Plus,SE;",
 	"O5,Speed,8MHz,16MHz;",
 	"ODE,CPU,68000,68010,68020;",
 	"O4,Memory,1MB,4MB;",
@@ -240,6 +241,7 @@ pll pll
 
 reg       status_mem;
 reg [1:0] status_cpu;
+reg       status_mod;
 reg       n_reset = 0;
 always @(posedge clk_sys) begin
 	reg [15:0] rst_cnt;
@@ -254,6 +256,7 @@ always @(posedge clk_sys) begin
 			rst_cnt    <= rst_cnt - 1'd1;
 			status_mem <= status[4];
 			status_cpu <= status[14:13];
+			status_mod <= status[9];
 		end
 		else begin
 			n_reset <= 1;
@@ -277,7 +280,7 @@ wire           [15:0] sd_buff_dout;
 wire           [15:0] sd_buff_din[SCSI_DEVS];
 wire                  sd_buff_wr;
 wire  [SCSI_DEVS-1:0] img_mounted;
-wire           [31:0] img_size;
+wire           [63:0] img_size;
 
 wire        ioctl_write;
 reg         ioctl_wait = 0;
@@ -424,7 +427,7 @@ wire memoryLatch;
 
 // peripherals
 wire vid_alt, loadPixels, pixelOut, _hblank, _vblank, hsync, vsync;
-wire memoryOverlayOn, selectSCSI, selectSCC, selectIWM, selectVIA, selectRAM, selectROM;
+wire memoryOverlayOn, selectSCSI, selectSCC, selectIWM, selectVIA, selectRAM, selectROM, selectSEOverlay;
 wire [15:0] dataControllerDataOut;
 
 // audio
@@ -582,7 +585,7 @@ addrController_top ac0
 	._cpuRW(_cpuRW),
 	._cpuAS(_cpuAS),
 	.turbo(status_turbo),
-	.configROMSize(configROMSize), 
+	.configROMSize({status_mod,~status_mod}),
 	.configRAMSize(configRAMSize), 
 	.memoryAddr(memoryAddr),
 	.memoryLatch(memoryLatch),
@@ -600,6 +603,7 @@ addrController_top ac0
 	.selectVIA(selectVIA),
 	.selectRAM(selectRAM),
 	.selectROM(selectROM),
+	.selectSEOverlay(selectSEOverlay),
 	.hsync(hsync), 
 	.vsync(vsync),
 	._hblank(_hblank),
@@ -627,6 +631,7 @@ dataController_top #(SCSI_DEVS) dc0
 	.clk8_en_n(clk8_en_n),
 	.E_rising(E_rising),
 	.E_falling(E_falling),
+	.machineType(status_mod),
 	._systemReset(n_reset),
 	._cpuReset(_cpuReset), 
 	._cpuIPL(_cpuIPL),
@@ -643,6 +648,7 @@ dataController_top #(SCSI_DEVS) dc0
 	.selectSCC(selectSCC),
 	.selectIWM(selectIWM),
 	.selectVIA(selectVIA),
+	.selectSEOverlay(selectSEOverlay),
 	.cpuBusControl(cpuBusControl),
 	.videoBusControl(videoBusControl),
 	.memoryDataOut(memoryDataOut),
@@ -688,7 +694,7 @@ dataController_top #(SCSI_DEVS) dc0
 
 	// block device interface for scsi disk
 	.img_mounted(img_mounted),
-	.img_size(img_size),
+	.img_size(img_size[40:9]),
 	.io_lba(sd_lba),
 	.io_rd(sd_rd),
 	.io_wr(sd_wr),
@@ -771,10 +777,10 @@ always @(posedge clk_sys) begin
 	
 	if(ioctl_write) begin
 		dio_data <= {ioctl_data[7:0], ioctl_data[15:8]};
-		dio_a <= {dio_index[1:0], dio_addr[18:0]};
+		dio_a <= dio_index[1:0] ? {dio_index[1:0], dio_addr[18:0]} : {dio_index[6], dio_addr[17:0]};
 		ioctl_wait <= 1;
 	end
-	
+
 	old_cyc <= dioBusControl;
 	if(~dioBusControl) dio_write <= ioctl_wait;
 	if(old_cyc & ~dioBusControl & dio_write) ioctl_wait <= 0;
@@ -786,7 +792,7 @@ wire download_cycle = dio_download && dioBusControl;
 
 ////////////////////////// SDRAM /////////////////////////////////
 
-wire [24:0] sdram_addr = download_cycle ? { 4'b0001, dio_a[20:0] } : { 3'b000, ~_romOE, memoryAddr[21:1] };
+wire [24:0] sdram_addr = download_cycle ? { 4'b0001, dio_a[20:0] } : { 3'b000, ~_romOE, _romOE ? memoryAddr[21:19] : {2'b00,status_mod}, memoryAddr[18:1] };
 wire [15:0] sdram_din  = download_cycle ? dio_data              : memoryDataOut;
 wire  [1:0] sdram_ds   = download_cycle ? 2'b11                 : { !_memoryUDS, !_memoryLDS };
 wire        sdram_we   = download_cycle ? dio_write             : !_ramWE;

@@ -80,6 +80,7 @@
 */
 
 module addrDecoder(
+	input [1:0] configROMSize,
 	input [23:0] address,
 	input _cpuAS,
 	input memoryOverlayOn,
@@ -88,7 +89,8 @@ module addrDecoder(
 	output reg selectSCSI,
 	output reg selectSCC,
 	output reg selectIWM,
-	output reg selectVIA
+	output reg selectVIA,
+	output reg selectSEOverlay
 );
 
 	always @(*) begin
@@ -98,34 +100,44 @@ module addrDecoder(
 		selectSCC = 0;
 		selectIWM = 0;
 		selectVIA = 0;
+		selectSEOverlay = 0;
 		
 		casez (address[23:20])
-			4'b00??: begin
+			4'b00??: begin //00 0000 - 3F FFFF
 				if (memoryOverlayOn == 0)
 					selectRAM = !_cpuAS;
 				else begin
 					if (address[23:20] == 0) begin
 						// Mac Plus: repeated images of overlay ROM only extend to $0F0000
 						// Mac 512K: more repeated ROM images at $020000-$02FFFF
+						// Mac SE:   overlay ROM at $00 0000 - $0F FFFF
 						selectROM = !_cpuAS;
 					end
 				end
 			end
-			4'b0100: 
-				if( address[17] == 1'b0)   // <- this detects SCSI!!!
+			4'b0100: begin //40 0000 - 4F FFFF
+				if(configROMSize[1] || address[17] == 1'b0)   // <- this detects SCSI (on Plus)!!!
 					selectROM = !_cpuAS;
-			4'b0101: 
-				if (address[19:12] == 8'h80)
+				selectSEOverlay = !_cpuAS;
+			end
+			4'b0101: begin //50 000 - 5F FFFF
+				if (address[19]) // 58 000 - 5F FFFF
 					selectSCSI = !_cpuAS;
+				selectSEOverlay = !_cpuAS;
+			end
 			4'b0110: 
 				if (memoryOverlayOn)
 					selectRAM = !_cpuAS;
 			4'b10?1:
 				selectSCC = !_cpuAS;
+			4'b1100: // C0 000 - CF FFF
+				if (!configROMSize[1])
+					selectIWM = !_cpuAS;
 			4'b1101:
 				selectIWM = !_cpuAS;
 			4'b1110:
-				selectVIA = !_cpuAS;
+				if (address[19]) // E8 000 - EF FFF
+					selectVIA = !_cpuAS;
 			default:
 				; // select nothing
 		endcase

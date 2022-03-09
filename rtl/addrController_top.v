@@ -9,7 +9,7 @@ module addrController_top(
 
 	// system config:
 	input turbo,               // 0 = normal, 1 = faster
-	input configROMSize,			// 0 = 64K ROM, 1 = 128K ROM
+	input [1:0] configROMSize,  // 0 = 64K ROM, 1 = 128K ROM, 2 = 256K ROM
 	input [1:0] configRAMSize,	// 0 = 128K, 1 = 512K, 2 = 1MB, 3 = 4MB RAM
 
 	// 68000 CPU memory interface:
@@ -38,6 +38,7 @@ module addrController_top(
 	output selectVIA,
 	output selectRAM,
 	output selectROM,
+	output selectSEOverlay,
 	
 	// video:
 	output hsync,
@@ -155,14 +156,14 @@ module addrController_top(
 	wire rom_access = (cpuBusControl && selectROM);
 	
 	// simulate smaller RAM/ROM sizes
-	assign macAddr[16] = rom_access && configROMSize == 1'b0 ? 1'b0 :     // force A16 to 0 for 64K ROM access
+	assign macAddr[16] = rom_access && configROMSize == 2'b00 ? 1'b0 :     // force A16 to 0 for 64K ROM access
 									addrMux[16]; 
 	assign macAddr[17] = ram_access && configRAMSize == 2'b00 ? 1'b0 :   // force A17 to 0 for 128K RAM access
-									rom_access && configROMSize == 1'b1 ? 1'b0 :  // force A17 to 0 for 128K ROM access
-									rom_access && configROMSize == 1'b0 ? 1'b1 :  // force A17 to 1 for 64K ROM access (64K ROM image is at $20000)
+									rom_access && configROMSize == 2'b01 ? 1'b0 :  // force A17 to 0 for 128K ROM access
+									rom_access && configROMSize == 2'b00 ? 1'b1 :  // force A17 to 1 for 64K ROM access (64K ROM image is at $20000)
 									addrMux[17]; 
 	assign macAddr[18] = ram_access && configRAMSize == 2'b00 ? 1'b0 :   // force A18 to 0 for 128K RAM access
-									rom_access ? 1'b0 : 								   // force A18 to 0 for ROM access
+	                     rom_access && configROMSize != 2'b11 ? 1'b0 : // force A18 to 0 for 64K/128K/256K ROM access
 									addrMux[18]; 
 	assign macAddr[19] = ram_access && configRAMSize[1] == 1'b0 ? 1'b0 : // force A19 to 0 for 128K or 512K RAM access
 									rom_access ? 1'b0 : 								   // force A19 to 0 for ROM access
@@ -188,6 +189,7 @@ module addrController_top(
 
 	// address decoding
 	addrDecoder ad(
+		.configROMSize(configROMSize),
 		.address(cpuAddr),
 		._cpuAS(_cpuAS),
 		.memoryOverlayOn(memoryOverlayOn),
@@ -196,7 +198,8 @@ module addrController_top(
 		.selectSCSI(selectSCSI),
 		.selectSCC(selectSCC),
 		.selectIWM(selectIWM),
-		.selectVIA(selectVIA));
+		.selectVIA(selectVIA),
+		.selectSEOverlay(selectSEOverlay));
 
 	// video
 	videoTimer vt(

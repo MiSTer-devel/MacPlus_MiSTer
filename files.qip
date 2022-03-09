@@ -6,6 +6,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/ncr5380.sv
 set_global_assignment -name VERILOG_FILE rtl/floppy_track_encoder.v
 set_global_assignment -name VERILOG_FILE rtl/floppy.v
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/ps2_kbd.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/adb.sv
 set_global_assignment -name VERILOG_FILE rtl/ps2_mouse.v
 set_global_assignment -name VERILOG_FILE rtl/scc.v
 set_global_assignment -name VERILOG_FILE rtl/uart/txuart.v

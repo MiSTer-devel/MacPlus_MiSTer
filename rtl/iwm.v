@@ -42,6 +42,7 @@ module iwm
 	input [15:0] dataIn,
 	input [3:0] cpuAddrRegHi,
 	input SEL, // from VIA
+	input driveSel, // internal drive select, 0 - upper, 1 - lower
 	output [15:0] dataOut,
 	input [1:0] insertDisk,
 	output [1:0] diskEject,
@@ -94,7 +95,7 @@ module iwm
 		.ca2(ca2),
 		.SEL(SEL),
 		.lstrb(lstrb),
-		._enable(~diskEnableInt),
+		._enable(~(diskEnableInt & driveSel)),
 		.writeData(writeData),
 		.readData(readDataInt),
 		.advanceDriveHead(advanceDriveHead),
