@@ -137,8 +137,7 @@ module addrController_top(
 	// RAM/ROM control signals
 	wire videoControlActive = _hblank;
 
-	wire extraRomRead = dskReadAckInt || dskReadAckExt;
-	assign _romOE = ~(extraRomRead || (cpuBusControl && selectROM && _cpuRW)); 
+	assign _romOE = ~(cpuBusControl && selectROM && _cpuRW);
 	
 	wire extraRamRead = sndReadAck;
 	assign _ramOE = ~((videoBusControl && videoControlActive) || (extraRamRead) ||

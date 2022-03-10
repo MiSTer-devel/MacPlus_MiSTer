@@ -792,11 +792,14 @@ wire download_cycle = dio_download && dioBusControl;
 
 ////////////////////////// SDRAM /////////////////////////////////
 
-wire [24:0] sdram_addr = download_cycle ? { 4'b0001, dio_a[20:0] } : { 3'b000, ~_romOE, _romOE ? memoryAddr[21:19] : {2'b00,status_mod}, memoryAddr[18:1] };
+wire [24:0] sdram_addr = download_cycle ? {4'b0001, dio_a[20:0] } : 
+                         ~_romOE        ? {4'b0001, 2'b00, status_mod, memoryAddr[18:1]} :
+                                          {3'b000, (dskReadAckInt || dskReadAckExt), memoryAddr[21:1]};
+
 wire [15:0] sdram_din  = download_cycle ? dio_data              : memoryDataOut;
 wire  [1:0] sdram_ds   = download_cycle ? 2'b11                 : { !_memoryUDS, !_memoryLDS };
 wire        sdram_we   = download_cycle ? dio_write             : !_ramWE;
-wire        sdram_oe   = download_cycle ? 1'b0                  : (!_ramOE || !_romOE);
+wire        sdram_oe   = download_cycle ? 1'b0                  : (!_ramOE || !_romOE || dskReadAckInt || dskReadAckExt);
 wire [15:0] sdram_do   = download_cycle ? 16'hffff : (dskReadAckInt || dskReadAckExt) ? extra_rom_data_demux : sdram_out;
 
 // during rom/disk download ffff is returned so the screen is black during download
