@@ -195,8 +195,8 @@ video_freak video_freak
 	.VGA_DE_IN(VGA_DE),
 	.VGA_DE(),
 
-	.ARX((!ar) ? 12'd4 : (ar - 1'd1)),
-	.ARY((!ar) ? 12'd3 : 12'd0),
+	.ARX((!ar) ? 12'd256 : (ar - 1'd1)),
+	.ARY((!ar) ? 12'd171 : 12'd0),
 	.CROP_SIZE(0),
 	.CROP_OFF(0),
 	.SCALE(status[12:11])
@@ -223,6 +223,9 @@ localparam CONF_STR = {
 	//"OA,Serial,Off,On;",
 	//"-;",
 	"R0,Reset & Apply CPU+Memory;",
+	"v,0;", // [optional] config version 0-99. 
+	        // If CONF_STR options are changed in incompatible way, then change version number too,
+			// so all options will get default values on first start.
 	"V,v",`BUILD_DATE
 };
 
