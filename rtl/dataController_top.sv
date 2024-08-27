@@ -114,7 +114,7 @@ module dataController_top(
 	reg [7:0] audio_latch;
 	always @(posedge clk32) begin
 		if(clk8_en_p && loadSoundD) begin
-			if(snd_ena) audio_latch <= 8'h00;
+			if(snd_ena) audio_latch <= 8'h7f; // when disabled, drive output high
 			else  	 	audio_latch <= memoryDataIn[15:8] - 8'd128;
 		end
 	end
