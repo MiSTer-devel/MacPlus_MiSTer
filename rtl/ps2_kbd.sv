@@ -20,7 +20,7 @@ module ps2_kbd
 	output 		 strobe_in
 );
 
-reg   [8:0] keymac;
+reg   [9:0] keymac;
 reg			key_pending;
 reg  [19:0] pacetimer;
 reg			inquiry_active;
@@ -90,8 +90,8 @@ assign strobe_in = ((cmd_model | cmd_test) & tick_short) | pop_key;
 
 /* Data to Mac */
 assign data_in = cmd_test 	  ? 8'h7d :
-		           cmd_model	  ? 8'h03 :
-		           key_pending ? (keymac[8] ? 8'h79 : keymac[7:0]) : 
+		           cmd_model	  ? 8'h0b :
+		           key_pending ? (keymac[9] ? {keymac[7],7'h71} : keymac[8] ? 8'h79 : keymac[7:0]) : 
 		                         8'h7b;	
 
 wire press        = ps2_key[9];
@@ -109,12 +109,13 @@ always @(posedge clk) begin
 			
 			if(!key_pending && !(capslock_key && capslock)) begin
 				key_pending <= 1;
-				keymac <= {key_code[8],~press,key_code[6:0]};
+				keymac <= {key_code[9:8],~press,key_code[6:0]};
 			end
 		end
 		
 		if (pop_key) begin
-			if (keymac[8]) keymac[8] <= 0;
+			if (keymac[9]) keymac[9] <= 0;
+			else if (keymac[8]) keymac[8] <= 0;
 			else key_pending <= 0;
 		end
 	end
@@ -125,8 +126,8 @@ end
 
 
 //use BRAM for table
-wire [8:0] key_code = code[ps2_key[8:0]];
-wire [8:0] code[512] =
+wire [9:0] key_code = code[ps2_key[8:0]];
+wire [9:0] code[512] =
 '{
 	/* 000 */ 9'h07b,
 	/* 001 */ 9'h07b,	//F9
@@ -249,10 +250,10 @@ wire [8:0] code[512] =
 	/* 076 */ 9'h07b,	//ESCAPE
 	/* 077 */ 9'h07b,	//NUMLOCK (Mac keypad clear?)
 	/* 078 */ 9'h07b,	//F11 <OSD>
-	/* 079 */ 9'h10d,	//KP +
+	/* 079 */ 10'h30d,	//KP +
 	/* 07a */ 9'h12b,	//KP 3
 	/* 07b */ 9'h11d,	//KP -
-	/* 07c */ 9'h105,	//KP *
+	/* 07c */ 10'h305,	//KP *
 	/* 07d */ 9'h139,	//KP 9
 	/* 07e */ 9'h07b,	//SCROLL LOCK / KP )
 	/* 07f */ 9'h07b,
@@ -458,7 +459,7 @@ wire [8:0] code[512] =
 	/* 147 */ 9'h07b,
 	/* 148 */ 9'h07b,
 	/* 149 */ 9'h07b,
-	/* 14a */ 9'h11b,	//KP /
+	/* 14a */ 10'h31b,	//KP /
 	/* 14b */ 9'h07b,
 	/* 14c */ 9'h07b,
 	/* 14d */ 9'h07b,
