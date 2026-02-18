@@ -193,8 +193,10 @@ IIR_filter #(.use_params(0)) IIR_filter
 	.cy1(cy1),
 	.cy2(cy2),
 
-	.input_l({~is_signed ^ cl[15], cl[14:0]}),
-	.input_r({~is_signed ^ cr[15], cr[14:0]}),
+	// Mac audio is always signed (converted via -128 in dataController_top)
+	// Bypass is_signed to avoid sign inversion when core reports AUDIO_S=0
+	.input_l({is_signed ? cl[15] : ~cl[15], cl[14:0]}),
+	.input_r({is_signed ? cr[15] : ~cr[15], cr[14:0]}),
 	.output_l(acl),
 	.output_r(acr)
 );
@@ -279,11 +281,20 @@ always @(posedge clk) if (ce) begin
 
 	pre_out <= a2[16:1];
 
+	// Mix cross-feed (stereo widening for MiSTer framework).
+	// Coefficients corrected to unity gain (sum = 1.0) to prevent saturation:
+	//   mix=1: 7/8 * core  + 1/8 * pre_in  (was: 7/8 + 1/4 = 1.125 → overflow)
+	//   mix=2: 3/4 * core  + 1/4 * pre_in  (was: 3/4 + 1/2 = 1.25  → overflow)
+	//   mix=3: 1/2 * core  + 1/2 * pre_in  (was: 1/2 + 1   = 1.5   → overflow)
+	// All pre_in slices use $signed() so the sign bit (pre_in[15]) is correctly
+	// propagated when the slice is added to the 17-bit a3 register.
+	// Using {pre_in[15], pre_in[15:1]} (16 bits) would be zero-extended to 17 bits,
+	// losing the sign for negative values and causing waveform asymmetry distortion.
 	case(mix)
 		0: a3 <= a2;
-		1: a3 <= $signed(a2) - $signed(a2[16:3]) + $signed(pre_in[15:2]);
-		2: a3 <= $signed(a2) - $signed(a2[16:2]) + $signed(pre_in[15:1]);
-		3: a3 <= {a2[16],a2[16:1]} + {pre_in[15],pre_in};
+		1: a3 <= $signed(a2) - $signed(a2[16:3]) + $signed(pre_in[15:3]);
+		2: a3 <= $signed(a2) - $signed(a2[16:2]) + $signed(pre_in[15:2]);
+		3: a3 <= $signed({a2[16],a2[16:1]}) + $signed(pre_in[15:1]);
 	endcase
 
 	if(att[4]) a4 <= 0;

@@ -95,27 +95,29 @@ module dataController_top(
 	
 	parameter SCSI_DEVS = 2;
 	
-	// add binary volume levels according to volume setting
-	assign audioOut = 
-		(snd_vol[0]?audio_x1:11'd0) +
-		(snd_vol[1]?audio_x2:11'd0) +
-		(snd_vol[2]?audio_x4:11'd0);
-
-	// three binary volume levels *1, *2 and *4, sign expanded
-	wire [10:0] audio_x1 = { {3{audio_latch[7]}}, audio_latch };
-	wire [10:0] audio_x2 = { {2{audio_latch[7]}}, audio_latch, 1'b0 };
-	wire [10:0] audio_x4 = {    audio_latch[7]  , audio_latch, 2'b00};
+	// Volume: snd_vol[2:0] is a 3-bit binary level (0=mute, 7=max).
+	// The original code summed scaled copies (x1+x2+x4) which is mathematically
+	// equivalent to multiplying by snd_vol. Replaced with explicit signed multiply
+	// for clarity. Range: [-128..+127] * [0..7] = [-896..+889], fits in [10:0].
+	assign audioOut = $signed(audio_latch) * $signed({1'b0, snd_vol});
 	
 	reg loadSoundD;
 	always @(posedge clk32)
 		if (clk8_en_n) loadSoundD <= loadSound;
 
-	// read audio data and convert to signed for further volume adjustment
+	// Read audio sample and convert unsigned (0-255) to signed (-128..+127).
+	// snd_ena=1 means the PWM output is forced HIGH continuously (100% duty cycle).
+	// In the analog domain this is maximum amplitude = +127 in signed PCM terms.
+	// Games like Lode Runner generate tones by toggling snd_ena at audio frequencies:
+	//   snd_ena=1 → +127 (PWM high  = tone "ON")
+	//   snd_ena=0 → sample from RAM, typically 128→0 signed (silence between pulses)
+	// The rapid toggle between +127 and 0 creates the square wave tone.
+	// 8'h7f (+127) is the CORRECT value here, NOT 0.
 	reg [7:0] audio_latch;
 	always @(posedge clk32) begin
 		if(clk8_en_p && loadSoundD) begin
-			if(snd_ena) audio_latch <= 8'h7f; // when disabled, drive output high
-			else  	 	audio_latch <= memoryDataIn[15:8] - 8'd128;
+			if(snd_ena) audio_latch <= 8'h7f;   // PWM forced HIGH = +127 in signed domain
+			else        audio_latch <= memoryDataIn[15:8] - 8'd128;
 		end
 	end
 	
