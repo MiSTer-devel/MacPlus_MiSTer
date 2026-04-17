@@ -442,6 +442,7 @@ wire [15:0] dataControllerDataOut;
 // audio
 wire snd_alt;
 wire loadSound;
+wire snd_advance;
 
 // floppy disk image interface
 wire dskReadAckInt;
@@ -623,6 +624,7 @@ addrController_top ac0
 
 	.snd_alt(snd_alt),
 	.loadSound(loadSound),
+	.snd_advance(snd_advance),
 
 	.dskReadAddrInt(dskReadAddrInt),
 	.dskReadAckInt(dskReadAckInt),
@@ -689,6 +691,7 @@ dataController_top #(SCSI_DEVS) dc0
 	.audioOut(audio),
 	.snd_alt(snd_alt),
 	.loadSound(loadSound),
+	.snd_advance(snd_advance),
 
 	// floppy disk interface
 	.insertDisk({dsk_ext_ins, dsk_int_ins}),

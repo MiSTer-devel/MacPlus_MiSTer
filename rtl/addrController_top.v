@@ -50,6 +50,7 @@ module addrController_top(
 		
 	input  snd_alt,
 	output loadSound,
+	output snd_advance,
 		
 	// misc
 	input memoryOverlayOn,
@@ -61,35 +62,56 @@ module addrController_top(
 	output dskReadAckExt
 );
 
-	// -------------- audio engine (may be moved into seperate module) ---------------
+	// -------------- audio engine ---------------
+	// On real Mac hardware, the ASG PAL reads one sound sample per horizontal
+	// line with perfectly periodic timing (one Mac line ≈ 352 clk8 at 7.8336 MHz).
+	// The Mac has exactly 370 lines per frame, so 370 samples at 22,254 Hz.
+	//
+	// The MiSTer uses 806 VGA lines (168 clk8 each) = 135,408 clk8 per frame.
+	// A Bresenham divider distributes 370 address advances across the frame.
+	//
+	// Previous implementation ran the Bresenham on sndReadAck events (every 16
+	// clk8), giving ±16 clk8 jitter (~4.4%). This version runs at clk8 granularity,
+	// reducing jitter to ±1 clk8 (~0.27%) — closely matching the real hardware's
+	// line-synchronous, zero-jitter timing.
+
 	assign loadSound = sndReadAck;
 
-	localparam SIZE = 20'd135408;  // 168*806 clk8 events per frame
-	localparam STEP = 20'd5920;    // one step every 16*370 clk8 events
-	
-	reg [21:0] audioAddr; 
-	reg [19:0] snd_div;
-	
-	reg sndReadAckD;
-	always @(posedge clk)
-		if (clk8_en_n) sndReadAckD <= sndReadAck;
-	
-	reg vblankD, vblankD2;
+	// sndAdvance pulses (one clk8 wide) when the Bresenham divider advances
+	// audioAddr. dataController_top uses this to commit the pre-buffered SDRAM
+	// sample to the audio output with clk8-level timing precision, eliminating
+	// the 0-15 clk8 output latency jitter from sndReadAck quantisation.
+	reg sndAdvance;
+	assign snd_advance = sndAdvance;
+
+	localparam [17:0] SND_SIZE = 18'd135408;  // clk8 events per frame (168×806)
+	localparam [17:0] SND_STEP = 18'd370;     // Bresenham step: 370 overflows per frame,
+	                                           // but the last coincides with vblank reset
+	                                           // (if takes priority over else-if), so
+	                                           // 369 actual advances + initial addr = 370 samples
+
+	reg [21:0] audioAddr;
+	reg [17:0] snd_div;
+
+	wire [17:0] snd_div_next = snd_div + SND_STEP;
+
+	reg vblankD;
 	always @(posedge clk) begin
-		if(clk8_en_p && sndReadAckD) begin
+		if (clk8_en_p) begin
 			vblankD <= _vblank;
-			vblankD2 <= vblankD;
-		
-			// falling adge of _vblank = begin of vblank phase
-			if(vblankD2 && !vblankD) begin
-				audioAddr <= snd_alt?22'h3FA100:22'h3FFD00;
-				snd_div <= 20'd0;
+			sndAdvance <= 1'b0;
+
+			// falling edge of _vblank = begin of vblank phase
+			if (vblankD && !_vblank) begin
+				audioAddr <= snd_alt ? 22'h3FA100 : 22'h3FFD00;
+				snd_div <= 18'd0;
+				sndAdvance <= 1'b1; // commit first sample at vblank
+			end else if (snd_div_next >= SND_SIZE) begin
+				snd_div <= snd_div_next - SND_SIZE;
+				audioAddr <= audioAddr + 22'd2;
+				sndAdvance <= 1'b1;
 			end else begin
-				if(snd_div >= SIZE-1) begin
-					snd_div <= snd_div - SIZE + STEP;
-					audioAddr <= audioAddr + 22'd2;
-				end else
-					snd_div <= snd_div + STEP;
+				snd_div <= snd_div_next;
 			end
 		end
 	end
