@@ -6,9 +6,9 @@
 // testing the Icon_Included bit, so a device returning zeroes gets a blank
 // desktop icon rather than a default one.
 //
-// The drawing is ours. A real HD20 serves its icon from the Z8 controller's
-// internal ROM (341-0339-A), which has never been dumped, so there is no
-// authentic bitmap to copy:
+// The drawing below is this core's own. A real HD20 serves its icon from the
+// Z8 controller's internal ROM (341-0339-A), which has never been dumped, so
+// there is no authentic bitmap to copy:
 //
 //     ................................
 //     ................................
@@ -44,7 +44,7 @@
 //     ................................
 //
 // The mask is the solid silhouette of that box, which is what lets the Finder
-// drag and highlight the icon as one shape. A case by ROW rather than by
+// drag and highlight the icon as one shape. A case by row rather than by
 // byte: only five of the 32 image rows and two of the 32 mask rows are
 // distinct, so the minimiser collapses nearly all of it.
 

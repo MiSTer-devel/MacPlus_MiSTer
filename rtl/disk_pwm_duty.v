@@ -1,9 +1,9 @@
 //
 // disk_pwm_duty.v -- the Mac's commanded floppy spindle duty.
 //
-// The 128K/512K control a 400K drive's spindle IN SOFTWARE. The Mac writes a
-// DITHERED sequence into the sound buffer and the commanded duty is derived
-// from the LOW 6 BITS of each word (Guide to the Macintosh Family Hardware,
+// The 128K/512K control a 400K drive's spindle in software. The Mac writes a
+// dithered sequence into the sound buffer and the commanded duty is derived
+// from the low 6 bits of each word (Guide to the Macintosh Family Hardware,
 // 400KB drive specification):
 //
 //   1. convert each value through the fixed 64-entry table below,
@@ -11,14 +11,11 @@
 //   3. index = sum/(count/10) - 11, clamped to 0..399,
 //   4. duty% = index / 4.19.
 //
-// Step 1 is not a detail. The table is a PERMUTATION (0, 1, 59, 2, 60, 40,
+// Step 1 is not a detail. The table is a permutation (0, 1, 59, 2, 60, 40,
 // 54, 3, ...), so the raw 6-bit value bears no useful monotonic relation to
 // the real duty: sum the raw values instead and the result wanders more or
 // less independently of what the Mac asked for, and the ROM's speed loop
 // never settles.
-//
-// Kept in its own module rather than inside dataController_top.sv, which
-// instantiates VHDL and so cannot be elaborated by a Verilog-only tool.
 //
 module disk_pwm_duty
 (
@@ -101,10 +98,10 @@ module disk_pwm_duty
 		endcase
 	endfunction
 
-	// PIPELINED IN THREE STAGES, deliberately. Doing the accumulate, the
+	// Pipelined in three stages, deliberately. Doing the accumulate, the
 	// sum*205 scaling and the clamp in one combinational chain missed the
 	// clk_sys setup budget by 3.9 ns. Samples arrive roughly every 2 us and
-	// the window is 100 of them, so two extra CYCLES here cost nothing
+	// the window is 100 of them, so two extra cycles here cost nothing
 	// measurable and buy a comfortable path.
 	reg [12:0] acc = 13'd0;
 	reg  [6:0] cnt = 7'd0;

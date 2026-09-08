@@ -6,14 +6,13 @@
    MultiBlock Write) and the storage back end sit on top of it and are not
    here.
 
-   A DCD device is a PEER OF floppy.v on the interface the IWM already
-   provides. That is not a simplification: the corrected DB-19 pinout (read
-   from the page image; the OCR of that table had shifted a column) says DCD
+   A DCD device is a peer of floppy.v on the interface the IWM already
+   provides. That is not a simplification: the corrected DB-19 pinout says DCD
    uses the ordinary RD and WR pins, with /ENBL2 as /Enable. Only PH0-PH2 are
    repurposed, from a drive-register address into a 3-bit handshake state bus.
    /WrReq and HDSel are N/C, so SEL is ignored here.
 
-   THE STATE IS {ca2,ca1,ca0} AS PLAIN BINARY, and the Mac changes one line at
+   The state is {ca2,ca1,ca0} as plain binary, and the Mac changes one line at
    a time, so intermediate states are seen and must not be acted on as
    commands. Only the settled value means anything.
 
@@ -26,14 +25,15 @@
         1  data mode - readData carries transmitted bytes
         0  HOFF asserted
 
-   /HSHK IS IDLE-HIGH, ASSERTED-LOW. The Plus ROM pins that down three ways:
+   /HSHK is idle-high, asserted-low. The Plus ROM pins that down three ways:
    the transmit entry ($419A98) errors $10 if sense is 0 at idle, then spins
    `bmi` waiting for it to fall; the end of transmission spins `bpl` waiting
    for it to rise; and the receive entry ($419820) refuses to start unless it
    is already 0.
 
-   AND IT IS DRIVEN FROM BOTH DIRECTIONS. A drive that only asserts /HSHK when IT wants to talk answers no command at
-   all: before sending anything the Mac asserts HOST and SPINS until the drive
+   And it is driven from both directions. A drive that only asserts /HSHK
+   when it wants to talk answers no command at all: before sending anything
+   the Mac asserts HOST and spins until the drive
    pulls /HSHK low, giving up with error $11. On hardware that presents as a
    diagnostic reporting "Comm error" while the ID probe still succeeds, because
    identification is a static level and needs no handshake.
@@ -42,7 +42,7 @@
      $419AA6  tst.b $200(a0)  ca0=1      -> state 3, HOST asserted
      $419AB0  subq.l #1,d7 / beq         timeout -> error $11
      $419AB6  read sense
-     $419ABA  bmi $419AB0                SPIN WHILE SENSE == 1
+     $419ABA  bmi $419AB0                spin while SENSE == 1
      $419ABC  tst.b $400(a0)  ca1=0      -> state 1, and only now send
 
    TashTwenty's receiver is the mirror image and settles the release too: wait
@@ -51,19 +51,19 @@
    returns to state 3 -- its IntEn3 comment reads "mac is done and is waiting
    for !HSHK to be deasserted" -- and the drive releases before idling.
 
-   EVERY TRANSMITTED BYTE HAS ITS MSB SET, and on this interface that is not a
+   Every transmitted byte has its MSB set, and on this interface that is not a
    quirk - it is the data-ready signal. iwm.v latches readData on newByteReady
    and clears the latch after a read, and the driver polls with `dbmi`,
    looping while the value is non-negative. A byte with the MSB clear would be
    indistinguishable from an empty latch.
 
-   THE FRAMING IS ASYMMETRIC, and both the Plus ROM and the HD20's own Z8
+   The framing is asymmetric, and both the Plus ROM and the HD20's own Z8
    firmware agree on the asymmetry:
 
      Mac -> drive:  <$AA> <txGroups+$81> <rxGroups+$81> then groups of 8,
-                    LSB BYTE FIRST followed by 7 data bytes
+                    LSB byte first followed by 7 data bytes
      drive -> Mac:  <$AA> then groups of 8, 7 data bytes followed by the
-                    LSB BYTE LAST
+                    LSB byte last
 
    The two count bytes carry the group count in each direction. Only the Mac
    sends them because only the drive needs telling - the Mac computed both
@@ -77,18 +77,18 @@
      transmitted[i] = $80 | (data[i] >> 1)
      lsbByte        = $80 | (L0<<0 | L1<<1 | ... | L6<<6)   Ln = data[n] & 1
 
-   THE LSB BIT ORDER IS data[n] -> BIT n, and it is easy to get backwards.
+   The LSB bit order is data[n] -> bit n, and it is easy to get backwards.
    The specification's Figure 1 cannot settle it: its worked example is
    $31..$37, whose LSBs are 1,0,1,0,1,0,1 and whose LSB byte is $D5 -- a
-   PALINDROME, identical under either order. Neither can a loopback bench,
-   because a reversed packing is self-consistent and INVISIBLE TO THE
-   CHECKSUM: it only permutes which of the seven bytes each +1 lands on, and
+   palindrome, identical under either order. Neither can a loopback bench,
+   because a reversed packing is self-consistent and invisible to the
+   checksum: it only permutes which of the seven bytes each +1 lands on, and
    the sum of seven bytes does not change. Four independent sources settle it,
    two on each side of the wire:
 
      Plus ROM, transmit  $419A4C..$419B06  six `roxr.b #1,d4` then `roxr.b #2,d4`
                          leaves [1, L6, L5, L4, L3, L2, L1, L0]
-     Plus ROM, receive   $4198C4  `lsr.b #1,d4 / addx.b d1,d1` -- the FIRST data
+     Plus ROM, receive   $4198C4  `lsr.b #1,d4 / addx.b d1,d1` -- the first data
                          byte takes bit 0, the second bit 1, and so on
      HD20 firmware, rx   L1dfc  `rrc R8 / rlc R9` per byte, R8 the LSB byte, so
                          again byte n takes bit n
@@ -99,7 +99,7 @@
    fails the `$419776 subi.b #$80` opcode compare with error $30, while the
    checksum still passes and the link looks healthy.
 
-   CHECKSUM: an 8-bit sum of the DECODED data bytes, sent as (-sum) & $FF, so
+   Checksum: an 8-bit sum of the decoded data bytes, sent as (-sum) & $FF, so
    a receiver validates by summing everything including the checksum byte to
    zero. Stated in neither specification; read out of both halves of the ROM
    driver independently (`neg.b d5` on transmit, `beq` on the running sum at
@@ -113,7 +113,7 @@ module dcd_link
 	input         cen,
 
 	// CPU speed, because the byte interval has to track it. The Mac polls for
-	// each byte out of a POOLED budget -- $4198C0 loads d6 with 80 and every
+	// each byte out of a pooled budget -- $4198C0 loads d6 with 80 and every
 	// `dbmi d6` in the group shares it -- and at 16 MHz it burns ~114 tries per
 	// group against a fixed 16 us byte, running out mid-group and erroring $22.
 	// Halve the constant rather than tick on cen16, which would put the FSM in
@@ -141,8 +141,7 @@ module dcd_link
 	// ---- command layer above ----
 	// A fully received payload is presented for one clock with rxValid (good
 	// checksum) or rxBad. Flattened rather than an array port so this stays
-	// plain Verilog-2001 for Quartus as well as iverilog; byte 0 is in the
-	// low bits, which is receive order.
+	// plain Verilog-2001; byte 0 is in the low bits, which is receive order.
 	output reg [63:0] rxBuf,
 	output reg  [3:0] rxLen,
 	output reg        rxValid,
@@ -161,26 +160,26 @@ module dcd_link
 	output reg  [7:0] rxStbData,
 	output reg  [9:0] rxStbAddr,
 
-	// High while the Mac holds the RESET state. The command layer must abandon
+	// High while the Mac holds the reset state. The command layer must abandon
 	// what it was doing: a reply still queued across a reset re-raises txReq
 	// afterwards, and the link then holds /HSHK waiting for a state 1 that is
 	// never coming (HD Diag error $28, "asserted but never released").
 	output            dcdReset,
 
 	// The command layer raises txReq with a payload; the link adds the sync,
-	// the group coding and the checksum. txLen is the payload length EXCLUDING
+	// the group coding and the checksum. txLen is the payload length excluding
 	// the checksum, and txLen+1 must be a multiple of 7.
 	//
-	// THE CHECKSUM MUST LAND IN THE LAST SLOT OF THE LAST GROUP, not merely
+	// The checksum must land in the last slot of the last group, not merely
 	// after the data: where a reply is shorter than the groups requested the
-	// padding goes BEFORE it. The HD20 firmware emits `com R4 / inc R4` as the
+	// padding goes before it. The HD20 firmware emits `com R4 / inc R4` as the
 	// seventh byte of the group in which its counter reaches zero, and
 	// TashTwenty sums one byte less than the block "so we can write the
 	// checksum to the very last byte position". That is why txLen+1 filling
 	// whole groups is the wire format and not a convenience.
 	//
-	// ARMING AND STARTING ARE TWO DIFFERENT THINGS. $419820, the first
-	// instruction of the Mac's receive routine, reads the sense line with NO
+	// Arming and starting are two different things. $419820, the first
+	// instruction of the Mac's receive routine, reads the sense line with no
 	// retry budget: /HSHK must already be asserted, error $20 otherwise, and
 	// the Mac arrives within microseconds of its own transmission ending -
 	// long before an SD card can answer. The sync byte by contrast has a
@@ -196,13 +195,13 @@ module dcd_link
 	input       [9:0] txLen,
 	output reg        txBusy,
 
-	// ONE-CLOCK PULSE: the frame was ABANDONED, not finished. txBusy falls
+	// One-clock pulse: the frame was abandoned, not finished. txBusy falls
 	// either way, so without this an abandoned read looks completed and the
 	// next block is armed into a bus the Mac has already left.
 	output reg        txAbort
 );
 
-	// The DCD sync byte. $AA in BOTH directions: the specification says writes
+	// The DCD sync byte. $AA in both directions: the specification says writes
 	// use $96, but no $96 exists in the DCD engine of any Plus ROM revision nor
 	// in the .Sony PTCH, and the May document's own handshake section says the
 	// sync "is always $AA". Requiring $96 would deadlock against Apple's driver.
@@ -211,7 +210,7 @@ module dcd_link
 	// 128 clk8 per byte - 2 us per bit - the rate floppy.v already uses. A real
 	// cell is 2.042 us because a real Mac clocks at 7.8333 MHz, but the IWM
 	// models that as its nominal 8 MHz enable, so matching floppy.v keeps DCD
-	// correct RELATIVE to everything else the IWM does.
+	// correct relative to everything else the IWM does.
 	wire [7:0] BYTE_TICKS = turbo ? 8'd64 : 8'd128;   // 8 us / 16 us
 
 	wire [2:0] state    = {ca2, ca1, ca0};
@@ -222,7 +221,7 @@ module dcd_link
 	// Mac-initiated command handshake, separate from the transmit FSM: two
 	// different conversations sharing one wire.
 	//
-	// ARMING REQUIRES PASSING THROUGH IDLE FIRST. State 3 occurs at BOTH ends
+	// Arming requires passing through idle first. State 3 occurs at both ends
 	// of every exchange, so a drive arming on state 3 alone would re-assert
 	// /HSHK the instant it finished a reply and deadlock against the Mac's
 	// end-of-transmission spin.
@@ -230,7 +229,7 @@ module dcd_link
 	           RXH_DATA  = 3'd3, RXH_DONE  = 3'd4;
 	reg [2:0] rxHs;
 
-	// A reply request is REMEMBERED, not acted on at once: the command layer
+	// A reply request is remembered, not acted on at once: the command layer
 	// raises txReq while the Mac is still in state 1 finishing its send, and a
 	// drive grabbing /HSHK there would never release it for the end-of-command
 	// acknowledgement. TashTwenty's Transmit refuses to start unless the state
@@ -261,7 +260,7 @@ module dcd_link
 	// In data mode the byte is on the bus; everywhere else bit 7 is the sense
 	// line, mirroring floppy.v's dual use of readData.
 	reg [7:0] txByte;
-	// STATE 0 PRESENTS DATA TOO, not just state 1: the Mac asserts the hold-off
+	// State 0 presents data too, not just state 1: the Mac asserts the hold-off
 	// and goes on reading the rest of the group ($419926-$419964 poll for four
 	// more bytes and raise error $22 if they do not come). Gating on state 1
 	// alone hands those reads $00.
@@ -271,11 +270,11 @@ module dcd_link
 	// ------------------------------------------------------------------
 	// Receive: Mac -> drive
 	// ------------------------------------------------------------------
-	// HOLD-OFF ON THIS DIRECTION IS NOT A RETRANSMISSION. When the Mac is
+	// Hold-off on this direction is not a retransmission. When the Mac is
 	// transmitting and finds an SCC interrupt pending it drops ca0 mid-group
-	// ($419B5A, after the group's fourth byte), FINISHES the group anyway,
+	// ($419B5A, after the group's fourth byte), finishes the group anyway,
 	// sends one filler $00, services the interrupt, releases HOFF, sends a
-	// fresh $AA and carries on with the NEXT group. $419BC8's `subq.w #1,d6`
+	// fresh $AA and carries on with the next group. $419BC8's `subq.w #1,d6`
 	// replaces the `dbra` it skipped, so nothing is resent and the checksum
 	// keeps running. The HD20 firmware receives it the same way (L1e53).
 	//
@@ -324,8 +323,8 @@ module dcd_link
 	reg  [7:0] txSum;
 	reg  [9:0] txSent;       // payload bytes emitted, including the checksum
 
-	// A hold-off seen mid-group. The group is FINISHED anyway and the flag is
-	// acted on at the group BOUNDARY, which is where the Plus ROM, the HD20
+	// A hold-off seen mid-group. The group is finished anyway and the flag is
+	// acted on at the group boundary, which is where the Plus ROM, the HD20
 	// firmware and TashTwenty all agree it may be acted on. Nothing rewinds,
 	// so nothing needs saving to restore.
 	reg        txHoff;
@@ -378,15 +377,15 @@ module dcd_link
 			rxStb        <= 0;
 			txAbort      <= 0;
 
-			// CLEARED UNDER cen, NOT ON EVERY CLOCK. newByteReady is set below
+			// Cleared under cen, not on every clock. newByteReady is set below
 			// inside `if (cen)` and iwm.v latches with `if (cen &&
 			// newByteReady)`, so clearing unconditionally holds it only on the
 			// clock after a cen tick, where the two never coincide and no reply
-			// byte reaches the latch. The clear comes BEFORE the transmit FSM,
+			// byte reaches the latch. The clear comes before the transmit FSM,
 			// so a byte presented on a cen tick still overrides it.
 			if (cen) newByteReady <= 0;
 
-			// State 4 is RESET: the device performs the equivalent of a
+			// State 4 is reset: the device performs the equivalent of a
 			// power-up reset. Handled here rather than folded into _reset so
 			// a mounted image is not disturbed.
 			if (selected && state == 3'd4) begin
@@ -422,8 +421,8 @@ module dcd_link
 						if (state == 3'd3) begin
 							hshk_n <= 1'b0;      // "ready to receive"
 							rxHs   <= RXH_READY;
-							// RE-SYNC THE BYTE FSM HERE. State 3 out of state 2
-							// always starts a FRESH command, so any rxState left
+							// Re-sync the byte FSM here. State 3 out of state 2
+							// always starts a fresh command, so any rxState left
 							// from a frame the Mac abandoned is stale; carried
 							// into the new frame it never finds sync again.
 							rxState <= RX_SYNC;
@@ -460,7 +459,7 @@ module dcd_link
 				// ---------------- receive ----------------
 				// The Mac transmits in state 1 and keeps going through the
 				// rest of a group after dropping to state 0 for a hold-off.
-				// The hold-off latch below is set BEFORE the case, so the
+				// The hold-off latch below is set before the case, so the
 				// group-boundary arm clears it cleanly.
 				if (selected && rxState == RX_GROUP && state == 3'd0)
 					rxHoff <= 1'b1;
@@ -473,11 +472,11 @@ module dcd_link
 						if (writeData == SYNC) rxState <= RX_CNT1;
 
 					RX_CNT1: begin
-						// $80 | TOTAL groups, the total INCLUDING the
+						// $80 | total groups, the total including the
 						// command's own group, so a command with no data
 						// sends $81. Settled from the drive firmware, which
 						// masks with $7F into R10 and uses `djnz R10`
-						// directly as its group loop: the masked value IS
+						// directly as its group loop: the masked value is
 						// the number of groups received.
 						rxGroups <= writeData[6:0];
 						rxState  <= RX_CNT2;
@@ -523,7 +522,7 @@ module dcd_link
 							if (rxIdx == 3'd7) begin
 								rxIdx <= 3'd0;
 								if (rxGroups <= 7'd1) begin
-									// Last group. The running sum INCLUDING
+									// Last group. The running sum including
 									// the checksum byte must be zero.
 									rxState <= RX_SYNC;
 									// rxCount has not yet taken this cycle's
@@ -560,34 +559,34 @@ module dcd_link
 				case (txState)
 				TX_IDLE: begin
 					// Remember a one-clock txReq until the bus reaches state
-					// 2. DO NOT latch from txArm as well: it is a LEVEL, still
+					// 2. Do not latch from txArm as well: it is a level, still
 					// high for one clock after its frame finished, and that
 					// tail becomes a phantom request that grabs the bus at the
-					// start of the NEXT command.
+					// start of the next command.
 					if (txReq && selected) txPend <= 1'b1;
 					else if (!txArm && !txGo) txPend <= 1'b0;
 
-					// Only out of IDLE, and only with the bus idle: see txPend
+					// Only out of TX_IDLE, and only with the bus idle: see txPend
 					// above.
 					if ((txReq || txArm || txPend) && selected && state == 3'd2) begin
 						txPend    <= 1'b0;
-							// Assert /HSHK and wait for the Mac to come round to
-							// state 1. It goes 2 -> 3 -> 1, sensing us in 3.
-							hshk_n    <= 1'b0;
-							txBusy    <= 1'b1;
-							txState   <= TX_WAIT;
-							rxHs      <= RXH_IDLE;
-							txSent    <= 0;
-							txAddr    <= 0;
-							txIdx     <= 0;
-							txSum     <= 0;
-							txTick    <= 0;
-							txLsbAcc  <= 8'h80;
-							txHoff    <= 1'b0;
+						// Assert /HSHK and wait for the Mac to come round to
+						// state 1. It goes 2 -> 3 -> 1, sensing us in 3.
+						hshk_n    <= 1'b0;
+						txBusy    <= 1'b1;
+						txState   <= TX_WAIT;
+						rxHs      <= RXH_IDLE;
+						txSent    <= 0;
+						txAddr    <= 0;
+						txIdx     <= 0;
+						txSum     <= 0;
+						txTick    <= 0;
+						txLsbAcc  <= 8'h80;
+						txHoff    <= 1'b0;
 					end
 				end
 
-				// Wait for state 1, but ONLY while the Mac is plausibly on its
+				// Wait for state 1, but only while the Mac is plausibly on its
 				// way. TashTwenty's Transmit spins on states 2 and 3 and calls
 				// XAbort on anything else; without that escape /HSHK stays low
 				// for ever if the Mac goes somewhere unexpected (error $28).
@@ -634,20 +633,20 @@ module dcd_link
 					end
 
 				// Seven data bytes, then the LSB byte, on this direction.
-				// A HOLD-OFF ARRIVING MID-GROUP DOES NOT ABANDON THE GROUP.
+				// A hold-off arriving mid-group does not abandon the group.
 				// 1.2a pages 4-5 say otherwise ("that group will be ignored
 				// and will not be included in the checksum ... restarts
 				// reading data with the group that was interrupted"), but
 				// nothing real behaves that way and the prose is simply wrong:
 				//
-				//   Plus ROM  $41991C asserts HOFF only AFTER four bytes of the
+				//   Plus ROM  $41991C asserts HOFF only after four bytes of the
 				//             next group are already read; $419926-$419964 go on
 				//             polling for the remaining four under an ~265 us
 				//             budget and raise error $22 if they stop arriving.
 				//             $41997A's `subq.w #1,d7` is the decrement the
 				//             skipped `dbne` would have done, so nothing is
 				//             backed up, and $419998 decodes the group in hand
-				//             and reads the NEXT one - checksum included.
+				//             and reads the next one - checksum included.
 				//   firmware  L1f4c-L1fac tests the hold-off line only after
 				//             the LSB byte of the group.
 				//   TashTwenty XSuspend: "Resume transmission after interrupted
@@ -664,7 +663,7 @@ module dcd_link
 				// triggers it.
 				TX_DATA: begin
 					if (state == 3'd0) txHoff <= 1'b1;
-					// THE MAC'S ERROR EXIT LEAVES 3, THEN 2. Neither is
+					// The Mac's error exit leaves 3, then 2. Neither is
 					// legitimate mid-group: the Mac reads in state 1 and only
 					// goes to 3 once it has taken the whole frame, by which
 					// time TX_END owns the release. Seeing either here means it
@@ -712,7 +711,7 @@ module dcd_link
 							txTick       <= BYTE_TICKS;
 							txIdx        <= 0;
 							txLsbAcc     <= 8'h80;
-							// THE GROUP BOUNDARY, and the only place a hold-off
+							// The group boundary, and the only place a hold-off
 							// is acted on. txAddr, txSent and txSum stay put:
 							// the group that just finished counts and stays in
 							// the checksum. The last group is never held off
@@ -724,7 +723,7 @@ module dcd_link
 					end
 				end
 
-				// ACKNOWLEDGE THE HOLD-OFF, then resume with the NEXT group.
+				// Acknowledge the hold-off, then resume with the next group.
 				// The March-85 timing figure puts the acknowledgement here and
 				// nowhere else ("Rene will acknowledge the holdoff immediately
 				// after the last byte of the group is sent"), and the firmware
@@ -736,9 +735,8 @@ module dcd_link
 				//
 				// The escapes matter as much as the resume. The ROM's error
 				// exit leaves state 2 or 3 behind, and without these the
-				// transmitter would hold /HSHK low there for ever - one half of
-				// the $28 wedge, and what put `reply-abandoned-in-TX_WAIT` in
-				// every crashed capture.
+				// transmitter would hold /HSHK low there for ever - one half
+				// of the $28 wedge.
 				TX_HOFF:
 					if (!selected || state >= 3'd4 || state == 3'd2 || state == 3'd3) begin
 						hshk_n  <= 1'b1;
@@ -756,9 +754,9 @@ module dcd_link
 					end
 					else hshk_n <= 1'b1;
 
-				// THE `cen` HERE SAVES THE LAST BYTE OF EVERY FRAME. readData
+				// The `cen` here saves the last byte of every frame. readData
 				// presents txByte only while txBusy is set, and the IWM
-				// latches on the cen tick AFTER the one that offered it, so
+				// latches on the cen tick after the one that offered it, so
 				// tearing down on the next clk drops txBusy inside that gap
 				// and the CPU latches $80 in place of the final LSB byte.
 				TX_END:

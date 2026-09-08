@@ -9,7 +9,7 @@
    behind a six-byte header. Frame layouts below were read out of ROM
    4D1F8172 and cross-checked against TashTwenty and the HD20 firmware.
 
-   THE FRAMING
+   The framing
 
      Status  from Mac:   <$AA> <$81> <$B1> <$03> <5 more> <CHK>   1 group
              from drive: <$AA> <$83> <blks> <stat> <pad> <pad> <pad>
@@ -37,58 +37,58 @@
    checks explicitly: $419776 does `subi.b #$80,$19C(a1)` and compares
    against the opcode it sent, erroring $30 on a mismatch.
 
-   FOUR PROPERTIES OF THE WRITE PATH, none of them guessable, all read out of
+   Four properties of the write path, none of them guessable, all read out of
    the ROM's per-block loop at $419712:
 
-   1. EACH BLOCK IS A SEPARATE COMMAND, transmitted and answered in turn.
+   1. Each block is a separate command, transmitted and answered in turn.
       $419712's `tst.b d1 / beq $419754` returns immediately for a read; only
       a write re-transmits. So unlike a read, the drive answers one group per
       command rather than sending N frames off one.
-   2. SUBSEQUENT BLOCKS CARRY THE OPCODE WITH BIT 6 SET -- $419716's
+   2. Subsequent blocks carry the opcode with bit 6 set -- $419716's
       `ori.b #$40,$19C(a1)` -- so $01 continues as $41 and $02 as $42.
-   3. THE REPLY OPCODE IS THE COMMAND OPCODE MASKED TO 6 BITS, THEN $80.
+   3. The reply opcode is the command opcode masked to 6 bits, then $80.
       $41975E masks the expected opcode with `andi.b #$3F` before $419776's
-      `subi.b #$80` compare, so $41 must be answered $81 and NOT $C1 -- and,
+      `subi.b #$80` compare, so $41 must be answered $81 and not $C1 -- and,
       just as firmly, $02 must be answered $82 and not $81. Error $30 either
       way.
-   4. THE DRIVE TRACKS THE BLOCK ADDRESS ITSELF ON A CONTINUED WRITE. The
+   4. The drive tracks the block address itself on a continued write. The
       reply lands on top of the command block at $19C, so by the time
       $41971C rewrites the count byte the three address bytes at $19E-$1A0
       hold the previous reply's status and padding -- zeros. Only $19D is
       refreshed. A drive that trusted the address would write every block of
       a multi-block write to block 0.
 
-   The count byte at $19D is the number of blocks STILL TO GO, counting down,
+   The count byte at $19D is the number of blocks still to go, counting down,
    and the reply must echo it: $41978C compares it against the Mac's own d3
    before $4197EE decrements, and a mismatch is error $31. The same applies
    to a multiblock read, whose first frame carries N.
 
-   MULTIBLOCK READ IS N SEPARATE TRANSMISSIONS, NOT ONE LONG ONE. The Mac
+   MultiBlock Read is N separate transmissions, not one long one. The Mac
    sends the command once, then calls its receive engine N times, each call
    hunting a fresh $AA. So the drive fetches a block, sends a whole 77-group
    frame, fetches the next, sends again.
 
-   AN ERROR IS ONE GROUP, NOT A SHORT DATA FRAME: txLen 6, header group only.
+   An error is one group, not a short data frame: txLen 6, header group only.
 
-   THE STATUS BYTE IS $81. Bit 0 is the bit this ROM tests - $4197DA's
-   `btst #24,d0` operates on the LONGWORD at $19E, so it names bit 0 of the
+   The status byte is $81. Bit 0 is the bit this ROM tests - $4197DA's
+   `btst #24,d0` operates on the longword at $19E, so it names bit 0 of the
    status byte, and the drive firmware agrees (`Op_Failed EQU 001h`). Bit 7
    is what the document and TashTwenty use, and is invisible to this ROM.
    Sending both means a refused write - a read-only mount, an address out of
    range - is reported as a failure to either reader.
 
-   WRITE-VERIFY IS SERVED AS A PLAIN WRITE, a deliberate deviation. A real
+   Write-Verify is served as a plain write, a deliberate deviation. A real
    HD20 read the block back off the platter to compare; there is no platter
    here, so the read-back would compare a buffer against itself. The status
    byte still reports a refused or timed-out write, which is the part the
    driver acts on.
 
-   THE 20 TAG BYTES ARE ZEROS, also a deviation. They are the file-system
+   The 20 tag bytes are zeros, also a deviation. They are the file-system
    block tags of the MFS/HFS era, which a real HD20 keeps on the medium
    beside each block; a plain disc image has nowhere to store them. The Mac
    copies them to $2FC onward but the ROM does not validate them.
 
-   THE IDENTITY BLOCK, and where each value comes from:
+   The identity block, and where each value comes from:
 
      off  size  field              value
        0     2  Device_Type        0
@@ -99,7 +99,7 @@
       10     2  Num_BadBlocks      0
       12    52  Manuf_Reserved     0
       64   256  Icon               rtl/dcd_icon.vh
-     320    12  trailer            a Pascal string -- and it is USER-VISIBLE
+     320    12  trailer            a Pascal string -- and it is user-visible
 
    Device_Character is $F6 on a writable mount and $DE on a locked one. The
    fixed bits are Mountable + Readable + Ejectable + Icon_Included +
@@ -110,14 +110,14 @@
    TashTwenty's own comment writes it "ejectable (?)" -- but $F6 is the value
    known to mount on real hardware.
 
-   NUM_BLOCKS IS CAPACITY MINUS ONE. The Plus ROM never reads the field --
+   Num_Blocks is capacity minus one. The Plus ROM never reads the field --
    there is no reference to $1A2-$1AB anywhere in $419600-$419E40 -- so it
    cannot be settled from the ROM, and this follows TashTwenty, which
    decrements it. Minus one is the safe direction either way: if the Mac
-   wants a count we lose one block of a volume, whereas if it wants a maximum
-   and we send a count it can address one block past the end of the image.
+   wants a count, a volume loses one block; if it wants a maximum and gets a
+   count, it can address one block past the end of the image.
 
-   CAPACITY IS THE MOUNTED IMAGE, not the 20 MB a real unit had. The protocol
+   Capacity is the mounted image, not the 20 MB a real unit had. The protocol
    was built for it -- capacity and block number are both 24-bit -- and the
    Floppy Emu serves up to 2 GB in HD20 mode. The ceiling is HFS, not DCD.
 */
@@ -174,7 +174,22 @@ module dcd
 	reg         diskRd, diskWr;
 	wire  [7:0] bufQ;
 
-	// Byte 26 of a frame is data byte 0 in BOTH directions - six header bytes
+	wire        dcdReset;
+	wire [63:0] rxBuf;
+	wire [3:0]  rxLen;
+	wire        rxValid, rxBad;
+	wire [6:0]  rxRspGroups;
+	wire        rxStb;
+	wire [7:0]  rxStbData;
+	wire [9:0]  rxStbAddr;
+	wire [9:0]  txAddr;
+	reg         txReq;
+	reg  [9:0]  txLen;
+	wire        txBusy;
+	wire        txAbort;
+	reg  [7:0]  txData;
+
+	// Byte 26 of a frame is data byte 0 in both directions - six header bytes
 	// then the 20 tags - so one offset serves the read path's txAddr and the
 	// write path's receive index. The subtraction is done on the full 10-bit
 	// index and truncated after, which is exact only because the buffer is
@@ -195,21 +210,6 @@ module dcd
 		.busy(diskBusy), .err(diskErr),
 		.buf_addr(bufAddr), .buf_q(bufQ), .buf_d(rxStbData), .buf_we(bufWe)
 	);
-
-	wire        dcdReset;
-	wire [63:0] rxBuf;
-	wire [3:0]  rxLen;
-	wire        rxValid, rxBad;
-	wire [6:0]  rxRspGroups;
-	wire        rxStb;
-	wire [7:0]  rxStbData;
-	wire [9:0]  rxStbAddr;
-	wire [9:0]  txAddr;
-	reg         txReq;
-	reg  [9:0]  txLen;
-	wire        txBusy;
-	wire        txAbort;
-	reg  [7:0]  txData;
 
 	// /HSHK is claimed the moment a command is accepted, not when the sector
 	// is ready: the Mac's receive routine checks the sense line with no retry
@@ -246,7 +246,7 @@ module dcd
 
 	// The 12-byte trailer at identity offset 320. BMOW's Floppy Emu treats it
 	// as frame padding and TashTwenty puts its credits there, but on a Plus it
-	// is USER-VISIBLE - the drive name the Finder shows, as in "Completely
+	// is user-visible - the drive name the Finder shows, as in "Completely
 	// erase disk named <volume> (MiSTer HD20)?" - so changing it changes what
 	// users see. That the Mac renders it correctly, length byte and all, at
 	// this exact offset also confirms the identity block is byte-accurate
@@ -277,8 +277,7 @@ module dcd
 	// Device_Character. Everything but the write pair is fixed: Mountable,
 	// Readable, Ejectable, Icon_Included, Disk_In_Place = $D6, and exactly one
 	// of Writable ($20) and Write_Protected ($08) joins it.
-	localparam WRITE_IMPLEMENTED = 1'b1;
-	wire writeProtected = ~WRITE_IMPLEMENTED | readonly;
+	wire writeProtected = readonly;
 	wire [7:0] deviceChar = 8'hD6 | (writeProtected ? 8'h08 : 8'h20);
 
 	// The four replies share a six-byte header and differ after it. The kind
@@ -300,7 +299,7 @@ module dcd
 		else if (txAddr == 10'd2)  txData = replyStat;
 		else if (txAddr <  10'd6)  txData = 8'h00;  // three pads complete the header
 
-		// ---- MultiBlock Write, and the generic ack: the header IS the reply ----
+		// ---- MultiBlock Write, and the generic ack: the header is the reply ----
 		else if (replyKind == K_WRITE || replyKind == K_ACK) txData = 8'h00;
 
 		// ---- MultiBlock Read: 20 tag bytes then the sector ----
@@ -332,7 +331,7 @@ module dcd
 	// ------------------------------------------------------------------
 	// A command arrives with its checksum already verified by the link layer.
 	//
-	// AN OPCODE WE DO NOT IMPLEMENT IS ANSWERED WITH AN EMPTY BLOCK, not
+	// An opcode we do not implement is answered with an empty block, not
 	// dropped. The Mac states an expected reply length with every command, so
 	// a header-only group of that length is a well-formed answer to anything,
 	// and it is what TashTwenty does. A logic-analyser capture of a real HD20
@@ -352,11 +351,11 @@ module dcd
 	// Mac's (deliberately long, $419D18) timeout to report "Initialization
 	// failed", with the drive never wedged and the disk never touched.
 	//
-	// THE ACK IS BOUNDED ON PURPOSE. Answering "fine" to work that was not
+	// The ack is bounded on purpose. Answering "fine" to work that was not
 	// done is harmless for $19/$1A -- there are no sector boundaries to lay
 	// down on an image file -- and it must not spread to anything that ought
-	// to report a genuine failure. So it covers ONLY opcodes with no
-	// implementation at all. A command that IS implemented and then refuses
+	// to report a genuine failure. So it covers only opcodes with no
+	// implementation at all. A command that is implemented and then refuses
 	// still takes its own path: a write that did not bring a full sector, or
 	// a continued write with nothing to continue from, is not answered here,
 	// and the refused-write path still reports $81.
@@ -508,14 +507,14 @@ module dcd
 					// sends "only the header group" with the status MSB set.
 					//
 					// $81, not $80: `$4197DA btst #24,d0` operates on the
-					// LONGWORD at $19E, so the bit it names is BIT 0 of the
+					// longword at $19E, so the bit it names is bit 0 of the
 					// status byte, and the drive's own firmware agrees
 					// (`Op_Failed EQU 001h`). Bit 7 is what 1.2a and
 					// TashTwenty use, and this ROM cannot see it, so a status
-					// of $80 alone reports a refused write as SUCCESS. $81
+					// of $80 alone reports a refused write as success. $81
 					// carries both readings.
 					//
-					// blksLeft is deliberately NOT reset here. The ROM checks
+					// blksLeft is deliberately not reset here. The ROM checks
 					// the reply's block byte against its own counter first
 					// ($41978C, error $31) and only then looks at the status,
 					// so zeroing it would report the wrong failure.
@@ -541,11 +540,11 @@ module dcd
 				// is done, so this state waits for it up then down; `sending`
 				// marks the second phase.
 				//
-				// AN ABANDONED FRAME IS NOT A FINISHED ONE and txBusy cannot
+				// An abandoned frame is not a finished one and txBusy cannot
 				// tell them apart, so a multiblock read must not arm the next
 				// block into a bus the Mac has already left - that puts an
 				// unsolicited frame on the wire. Drop txArm and return to
-				// C_IDLE. txArm is a LEVEL, cleared HERE, one state before the
+				// C_IDLE. txArm is a level, cleared here, one state before the
 				// link's TX_IDLE can look at it again.
 				if (txAbort) begin
 					sending <= 1'b0;

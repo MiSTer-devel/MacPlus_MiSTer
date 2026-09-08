@@ -1332,16 +1332,9 @@ wire signed [15:0] ap_src_l = (ap_ch0 == 8'h01) ? sum_l[15:0] :
                               (ap_ch0 == 8'h02) ? sum_r[15:0] : 16'sd0;
 wire signed [15:0] ap_src_r = (ap_ch1 == 8'h02) ? sum_r[15:0] :
                               (ap_ch1 == 8'h01) ? sum_l[15:0] : 16'sd0;
-//
-// The gain is REGISTERED, not read into a wire, so that Quartus infers a ROM
-// instead of flattening the table into a 256-way mux. The extra cycle is
-// free: ap_vol0/1 only move on a MODE SELECT of page 0x0E.
 `include "cd_vol_lut.vh"
-reg [15:0] ap_gain_l, ap_gain_r;
-always @(posedge clk) begin
-	ap_gain_l <= cd_vol_gain(ap_vol0);
-	ap_gain_r <= cd_vol_gain(ap_vol1);
-end
+wire [15:0] ap_gain_l = cd_vol_gain(ap_vol0);
+wire [15:0] ap_gain_r = cd_vol_gain(ap_vol1);
 wire signed [31:0] ap_scl_l = ap_src_l * $signed({1'b0, ap_gain_l});
 wire signed [31:0] ap_scl_r = ap_src_r * $signed({1'b0, ap_gain_r});
 reg  [2:0] odiv;
@@ -1384,13 +1377,9 @@ endmodule
 // MLAB variant for the small (2 Kbit) planes. Same contract as cd_sdp; the
 // forced-M10K recipe above exists because AUTO turned these into ~2000
 // registers each — MLAB is the third option that recipe predates: ALM-based
-// distributed RAM, zero M10K blocks. The 513/553 M10K (93%) figure once cited
-// here as motivation is MacLC's, not this core's: MacPlus fits at 24% of
-// blocks, so the placement pressure that justified MLAB does not exist here.
-// It is kept because it is hardware-proven and costs nothing to keep, not
-// because blocks are scarce. Their ping-pong usage never reads a plane being
-// written (write one half, read the other), so MLAB read-during-write
-// semantics are safe with no_rw_check.
+// distributed RAM, zero M10K blocks. Their ping-pong usage never reads a
+// plane being written (write one half, read the other), so MLAB
+// read-during-write semantics are safe with no_rw_check.
 module cd_sdp_mlab #(parameter DW = 16, AW = 12)
 (
 	input           clock,

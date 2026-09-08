@@ -5,7 +5,7 @@
    read-only). rtl/dcd.v drives it one block at a time, because that is how
    the protocol works.
 
-   BYTE LANES ARE NOT A FREE CHOICE. The HPS packs disk byte 0 into
+   Byte lanes are not a free choice. The HPS packs disk byte 0 into
    sd_buff_dout[7:0], so even bytes go in buffer0 and odd ones in buffer1 -
    the same mapping rtl/scsi.v uses. Backwards, it transposes every byte pair
    in every sector and is invisible until something reads a filesystem. This
@@ -16,8 +16,8 @@
    instantiation: scsi_dpram lives inside rtl/scsi.v, and a DCD device has to
    work on a 512Ke, a machine defined by having no SCSI at all.
 
-   SD_BUFF_WR IS SHARED ACROSS EVERY SLOT and must be qualified with our own
-   sd_ack, or another slot's transfer writes into our sector.
+   sd_buff_wr is shared across every slot and must be qualified against this
+   module's own sd_ack, or another slot's transfer writes into its sector.
    rtl/floppy_loader.v makes the same guard for the same reason.
 
    The ack timeout is not defensive padding: without it a stalled or absent
@@ -26,7 +26,7 @@
 */
 
 module dcd_disk #(
-	parameter ACK_TIMEOUT_BITS = 24   // ~0.5 s at clk_sys; benches override it
+	parameter ACK_TIMEOUT_BITS = 24   // ~0.5 s at clk_sys
 ) (
 	input             clk,
 	input             _reset,
@@ -57,7 +57,7 @@ module dcd_disk #(
 	output            busy,
 	output reg        err,           // last request failed; cleared by the next
 
-	// ---- sector buffer, byte addressed. buf_q is REGISTERED: it follows
+	// ---- sector buffer, byte addressed. buf_q is registered: it follows
 	//      buf_addr by one clock, like any inferred block RAM. ----
 	input       [8:0] buf_addr,
 	output      [7:0] buf_q,
@@ -77,14 +77,12 @@ module dcd_disk #(
 	// past 2^24 blocks is clamped rather than allowed to wrap to a tiny
 	// capacity. HFS is the practical ceiling long before this.
 	//
-	// NOT RESET BY _reset, deliberately. A mounted image is HOST state: a real
+	// Not reset by _reset, deliberately. A mounted image is host state: a real
 	// HD20 is a separate box with its own power supply, so a Mac reset neither
 	// ejects its medium nor spins it down, and rtl/scsi.v settles the same
-	// question for the CD-ROM the same way. It is also the only way the drive
-	// can be identified at all -- the ROM's DCD probe at $418630 runs a few
-	// hundred ms into every boot, while img_mounted is a one-shot that never
-	// fires again, so clearing `present` on reset guarantees present=0 at
-	// probe time on every boot.
+	// question for the CD-ROM the same way. img_mounted is also a one-shot, so
+	// clearing `present` on reset would leave present=0 at the ROM's DCD probe
+	// ($418630) on every boot.
 	initial begin
 		present    = 1'b0;
 		blockCount = 24'd0;

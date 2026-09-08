@@ -1,4 +1,4 @@
-`include "sdram_map.vh"   // floppy-image byte offsets; see MacPlus.sv
+`include "sdram_map.vh"   // floppy-image byte offsets
 
 module addrController_top(
 	// clocks:
@@ -202,23 +202,11 @@ module addrController_top(
 	// simulate smaller RAM/ROM sizes
 	assign macAddr[16] = rom_access && configROMSize == 2'b00 ? 1'b0 :     // force A16 to 0 for 64K ROM access
 									addrMux[16]; 
-	// The 64K branch below used to force A17 to 1, with the comment "64K ROM
-	// image is at $20000". That was true of plus_too's single-blob ROM
-	// region, where a 64K image sat just above the Plus's 128K ROM, but it
-	// has been dead code ever since: configROMSize was derived from a single
-	// Plus-or-SE bit, so 2'b00 was unreachable until the 128K and 512K were
-	// exposed.
-	//
-	// Every boot ROM now has its own 512KB slot and each image is written at
-	// its slot's offset 0 (rtl/rom_word_addr.v, fed by dio_addr, which starts
-	// at 0). So boot2.rom lands at slot 2 + $00000 while this forcing read it
-	// back from slot 2 + $20000 -- SDRAM nobody ever wrote -- and the 68000
-	// fetched its reset SP/PC from that hole and halted.
-	//
-	// Forcing A17 to 0 puts the 64K ROM where every other ROM size already
-	// reads from: offset 0 of its own slot. With A16 also forced to 0 above,
-	// the image occupies bytes $00000-$0FFFF and aliases every 64KB across
-	// the Mac's ROM window, which is what a real 64K ROM does.
+	// Every boot ROM is written at offset 0 of its own 512KB slot, the 64K
+	// image included, so A17 is forced to 0 here rather than to 1. With A16
+	// also forced to 0 above, the image occupies bytes $00000-$0FFFF and
+	// aliases every 64KB across the Mac's ROM window, which is what a real
+	// 64K ROM does.
 	assign macAddr[17] = ram_access && configRAMSize == 2'b00 ? 1'b0 :   // force A17 to 0 for 128K RAM access
 									rom_access && configROMSize == 2'b01 ? 1'b0 :  // force A17 to 0 for 128K ROM access
 									rom_access && configROMSize == 2'b00 ? 1'b0 :  // force A17 to 0 for 64K ROM access (image sits at its slot's offset 0)
@@ -276,8 +264,7 @@ module addrController_top(
 
 	// Byte offsets of each floppy image within the disk region. Named in
 	// rtl/sdram_map.vh so that they and the boot-ROM slots can be checked
-	// against each other in one place. Unchanged in value: giving ROM its own
-	// region moved ROM, not the disks.
+	// against each other in one place.
 	assign memoryAddr =
 		dskReadAckInt ? dskReadAddrInt + `DSK_INT_BYTE_OFF:   // first dsk image at 1MB
 		dskReadAckExt ? dskReadAddrExt + `DSK_EXT_BYTE_OFF:   // second dsk image at 2MB

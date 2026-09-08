@@ -82,7 +82,7 @@ module dataController_top(
 	output memoryOverlayOn,
 	input [1:0] insertDisk,
 	input [1:0] diskSides,
-	input drive800k, // drive MECHANISM: see floppy.v's port comment
+	input drive800k, // drive mechanism: see floppy.v's port comment
 	output [1:0] diskEject,
 	output [1:0] diskMotor,
 	output [1:0] diskAct,
@@ -160,6 +160,18 @@ module dataController_top(
 	always @(posedge clk32)
 		if (clk8_en_n) loadSoundD <= loadSound;
 
+	// Spindle duty for a 400K drive, computed in rtl/disk_pwm_duty.v exactly
+	// as the hardware does it: low 6 bits -> 64-entry conversion table ->
+	// sum of 100 -> /10 - 11, clamped 0..399.
+	wire [8:0] disk_pwm;
+	disk_pwm_duty disk_pwm_duty_inst
+	(
+		.clk        ( clk32 ),
+		.sample_en  ( clk8_en_p && loadSoundD ),
+		.sample     ( memoryDataIn[5:0] ),
+		.duty_index ( disk_pwm )
+	);
+
 	// Pre-latch audio scheme:
 	// The SDRAM reads audioAddr at sndReadAck rate (every 16 clk8), but the
 	// Bresenham divider advances audioAddr at clk8 granularity (~366 clk8 spacing).
@@ -174,20 +186,6 @@ module dataController_top(
 	// The one-sample latency (audio_prebuf contains sample[N-1] when addr advances
 	// to N) is a constant delay, inaudible, and matches real hardware where the
 	// sample is read and used within the same line period.
-	// Spindle duty for a 400K drive, computed in rtl/disk_pwm_duty.v exactly
-	// as the hardware does it: low 6 bits -> 64-entry conversion table ->
-	// sum of 100 -> /10 - 11, clamped 0..399. It is a separate module
-	// because this file instantiates VHDL and so cannot be elaborated by a
-	// Verilog-only tool.
-	wire [8:0] disk_pwm;
-	disk_pwm_duty disk_pwm_duty_inst
-	(
-		.clk        ( clk32 ),
-		.sample_en  ( clk8_en_p && loadSoundD ),
-		.sample     ( memoryDataIn[5:0] ),
-		.duty_index ( disk_pwm )
-	);
-
 	reg [7:0] audio_prebuf;
 	reg [7:0] audio_sample;
 

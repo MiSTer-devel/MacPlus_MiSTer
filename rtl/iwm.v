@@ -53,8 +53,8 @@ module iwm
 	input [1:0] insertDisk,
 	output [1:0] diskEject,
 	input [1:0] diskSides,
-	input drive800k, // drive MECHANISM: see floppy.v's port comment
-	input [8:0] disk_pwm, // spindle duty INDEX 0..399: see floppy.v's tachometer
+	input drive800k, // drive mechanism: see floppy.v's port comment
+	input [8:0] disk_pwm, // spindle duty index 0..399: see floppy.v's tachometer
 	
 	output [1:0] diskMotor,
 	output [1:0] diskAct,
@@ -143,7 +143,7 @@ module iwm
 	wire writeReqInt = cen && dataRegWrite && !selectExternalDriveNext;
 	wire writeReqExt = cen && dataRegWrite &&  selectExternalDriveNext;
 
-	// THE DCD NEEDS AN EDGE, NOT A LEVEL. dataRegWrite is a level on _cpuLDS,
+	// The DCD needs an edge, not a level. dataRegWrite is a level on _cpuLDS,
 	// which fx68k holds for three CPU clock periods and so three cen samples.
 	// floppy.v never noticed because it refuses a writeReq while its 16 us
 	// write-busy is set; dcd_link.v has no such interlock and would take each
@@ -227,7 +227,7 @@ module iwm
 		.ca2(ca2),
 		.SEL(SEL),
 		.lstrb(lstrb),
-		// HELD DISABLED WHILE A DCD IMAGE IS MOUNTED. The DCD takes over the
+		// Held disabled while a DCD image is mounted. The DCD takes over the
 		// readData/newByteReady/sense mux below, but writeReqExt and the PH3
 		// strobes would still reach this floppy - writing the DCD's command
 		// bytes onto a mounted floppy's track 0, and ejecting it on the ROM's
@@ -270,17 +270,16 @@ module iwm
 	// ------------------------------------------------------------------
 	// DCD (Apple HD20)
 	// ------------------------------------------------------------------
-	// A DCD device is a PEER of floppy.v on this same byte interface: the
+	// A DCD device is a peer of floppy.v on this same byte interface: the
 	// corrected DB-19 pinout puts it on the ordinary RD/WR pins with /ENBL2 as
-	// its enable, so it hangs off the EXTERNAL drive port and only PH0-PH2 are
+	// its enable, so it hangs off the external drive port and only PH0-PH2 are
 	// repurposed, from a drive-register address into a handshake state bus.
 	//
-	// IT REPLACES THE EXTERNAL FLOPPY RATHER THAN CHAINING WITH IT, and only
+	// It replaces the external floppy rather than chaining with it, and only
 	// while a DCD image is mounted. A real HD20 daisy-chains a floppy behind
 	// itself (PH3 selects down the chain, which is why rtl/dcd_link.v takes
-	// lstrb at all); we do not, so mounting an HD20 costs the external floppy.
-	// It keeps the property that matters more: with no DCD image mounted the
-	// external port is bit-identical to what it has always been.
+	// lstrb at all); this one does not. With no DCD image mounted the external
+	// port is bit-identical to what it has always been.
 	//
 	// "Replaces" is enforced at floppyExt's _enable above, not only at the read
 	// mux below, so the external floppy never sees /ENBL2 while dcdPresent.
@@ -322,17 +321,13 @@ module iwm
 	wire [7:0] readDataExtSel      = dcdPresent ? readDataDcd     : readDataExt;
 	wire       newByteReadyExtSel  = dcdPresent ? newByteReadyDcd : newByteReadyExt;
 
-	// THE SENSE LINE HAS TO COME THROUGH THE SAME MUX AS THE DATA. Taking it
-	// from readDataExt[7] unconditionally - i.e. the external FLOPPY's, always
-	// - is enough on its own to hide the DCD completely.
-	// The status register (Q7=0, Q6=1) is where both programs that look for a
-	// DCD look: the ROM's ID probe at $418600 and HD Diag's `tst.b $1c00(a2)`
-	// at $D938. With the floppy answering, state 7 returns its INSTALLED
-	// register - 0 - and the probe fails at $418634's `bpl`.
-	//
-	// Taking bit 7 of readDataExtSel rather than a second copy of the mux keeps
-	// the two in step by construction, and with nothing mounted it reduces to
-	// readDataExt[7] exactly.
+	// The sense line has to come through the same mux as the data. The status
+	// register (Q7=0, Q6=1) is where both programs that look for a DCD look:
+	// the ROM's ID probe at $418600 and HD Diag's `tst.b $1c00(a2)` at $D938.
+	// With the floppy answering, state 7 returns its INSTALLED register - 0 -
+	// and the probe fails at $418634's `bpl`. Taking bit 7 of readDataExtSel
+	// rather than a second copy of the mux keeps the two in step, and with
+	// nothing mounted it reduces to readDataExt[7] exactly.
 	wire senseExt = readDataExtSel[7];
 
 	wire [7:0] readData = selectExternalDrive ? readDataExtSel : readDataInt;

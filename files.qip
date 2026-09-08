@@ -25,7 +25,6 @@ set_global_assignment -name VERILOG_FILE rtl/dcd_disk.v
 set_global_assignment -name VHDL_FILE rtl/via6522.vhd
 set_global_assignment -name VERILOG_FILE rtl/mac_model.v
 set_global_assignment -name VERILOG_FILE rtl/disk_pwm_duty.v
-set_global_assignment -name VERILOG_FILE rtl/rom_word_addr.v
 set_global_assignment -name VERILOG_FILE rtl/addrDecoder.v
 set_global_assignment -name VERILOG_FILE rtl/addrController_top.v
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/dataController_top.sv

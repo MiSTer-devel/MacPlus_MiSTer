@@ -78,11 +78,11 @@ module floppy
 	output reg newByteReady,
 	input insertDisk,
 	input diskSides,
-	// The DRIVE's capability, not the media's: 1 = 800K double-sided
+	// The drive's capability, not the media's: 1 = 800K double-sided
 	// mechanism, 0 = 400K single-sided. Constant per model, unlike diskSides
 	// above, which describes whichever image is mounted.
 	input drive800k,
-	// Spindle duty INDEX, 0..399, from rtl/disk_pwm_duty.v. Only a 400K
+	// Spindle duty index, 0..399, from rtl/disk_pwm_duty.v. Only a 400K
 	// mechanism obeys it; see the tachometer below.
 	input [8:0] disk_pwm,
 	output diskEject,
@@ -129,10 +129,8 @@ module floppy
 		1'b0, // INSTALLED = yes
 		1'b0, // READY = yes
 		// SIDES: the 128K and 512K shipped a mechanically single-sided 400K
-		// drive. It was hardcoded because until those models were exposed
-		// every model the core offered genuinely had an 800K drive.
-		// MacPlus.sv gates the MEDIA on this same signal; this gates the
-		// MECHANISM, which is the half the ROM interrogates.
+		// drive. MacPlus.sv gates the media on this same signal; this gates
+		// the mechanism, which is the half the ROM interrogates.
 		drive800k, // SIDES: 1 = double-sided drive, 0 = single-sided
 		1'b0, // UNUSED
 		1'b0, // SUPERDR
@@ -527,20 +525,19 @@ module floppy
 	end
 
 	// DRIVE_REG_TACH  7  Tachometer (produces 60 pulses for each rotation of the drive motor)
-	/* Data from MESS, sonydriv.c:
-	   Tracks	RPM   Timing Value
-	   00-15:   500   timing value $117B (acceptable range {1135-11E9})
-	   16-31:   550   timing value $???? (acceptable range {12C6-138A})
-	   32-47:   600   timing value $???? (acceptable range {14A7-157F})
-	   48-63:   675   timing value $???? (acceptable range {16F2-17E2})
-	   64-79:   750   timing value $???? (acceptable range {19D0-1ADE})
+	/* Data from mess, sonydriv.c:
+	   Tracks	rpm   Timing Value
+	   00-15:   402   timing value $117B (acceptable range {1135-11E9})
+	   16-31:   438   timing value $???? (acceptable range {12C6-138A})
+	   32-47:   482   timing value $???? (acceptable range {14A7-157F})
+	   48-63:   536   timing value $???? (acceptable range {16F2-17E2})
+	   64-79:   603   timing value $???? (acceptable range {19D0-1ADE})
 
-	   CAUTION: those RPM labels are WRONG and cost time. The real CLV speeds
-	   (Guide to the Macintosh Family Hardware) are 402/438/482/536/603 rpm.
-	   The PERIODS below are right -- RPM = clk8 / (2*period), since TACH is
-	   60 pulses (120 edges) per revolution: 9996 -> 406 rpm, 9122 -> 445,
-	   8292 -> 490, 7463 -> 544, 6634 -> 612, all within ~1.5%% of the real
-	   table. Only the labels in this comment were wrong.
+	   The rpm column is corrected: mess labels these 500/550/600/675/750, but
+	   the real CLV speeds (Guide to the Macintosh Family Hardware) are the
+	   ones above. The periods below give rpm = clk8 / (2*period), since TACH
+	   is 60 pulses (120 edges) per revolution: 9996 -> 406 rpm, 9122 -> 445,
+	   8292 -> 490, 7463 -> 544, 6634 -> 612, all within ~1.5% of that table.
 		
 		Experimentally determined toggle rates for Plus Too with 8.125 MHz CPU clock:
 		TACH Half Period Clocks		Resulting Timing Value
@@ -565,13 +562,13 @@ module floppy
 			3: // tracks 48-63
 				driveTachBase <= 7463;
 			default: // tracks 64-79
-				driveTachBase <= 6634;	
+				driveTachBase <= 6634;
 		endcase
 	end
 
-	// ---- spindle speed: who controls it, the Mac or the drive? ---------
+	// ---- spindle speed ------------------------------------------------
 	//
-	// On a 400K mechanism the Mac controls motor speed IN SOFTWARE: it writes
+	// On a 400K mechanism the Mac controls motor speed in software: it writes
 	// a dithered PWM value into the low bits of every sound-buffer word
 	// (converted to a duty index by rtl/disk_pwm_duty.v and arriving here as
 	// disk_pwm, 0..399) and closes the loop by reading TACH back. An 800K
@@ -579,7 +576,7 @@ module floppy
 	// 512Ke keep the track-indexed table above.
 	//
 	// This is the whole of Sad Mac 0F0004. The 64K ROM calibrates by measuring
-	// the tach, CHANGING the PWM and measuring again, then dividing by the
+	// the tach, changing the PWM and measuring again, then dividing by the
 	// difference. Against a drive that ignores the PWM both measurements come
 	// out identical, the divisor is zero, and the ROM takes a divide-by-zero:
 	// class 0F, subclass 0004 -- the documented failure for a 64K-ROM Mac on
@@ -588,16 +585,15 @@ module floppy
 	//
 	// The duty index sets the period outright, as it does on real hardware -
 	// a real drive has no idea which track the head is on, and the Mac gets
-	// each CLV zone's speed by COMMANDING A DIFFERENT DUTY. Fitted to the two
+	// each CLV zone's speed by commanding a different duty. Fitted to the two
 	// documented operating points: index 101 is ~402 rpm (period 9996, tracks
 	// 0-15) and index 302 is ~603 rpm (period 6634, tracks 64-79), giving
 	// period = 11686 - 17*index over 11686..4903. That brackets the whole CLV
 	// table with the ROM's operating range mid-scale, which is what a
 	// converging loop needs.
 	//
-	// Absolute accuracy is not required - the ROM calibrates against whatever
-	// curve the drive presents - but the response must be monotonic, correctly
-	// signed and have headroom at both rails.
+	// Absolute accuracy is not required, since the ROM calibrates against
+	// whatever curve the drive presents, but the response must be monotonic.
 	wire [13:0] pwm_span   = {disk_pwm, 4'b0} + {5'b0, disk_pwm}; // index*17
 	wire [13:0] pwm_period = 14'd11686 - pwm_span;                // 11686..4903
 	wire [13:0] driveTachPeriod = drive800k ? driveTachBase : pwm_period;
