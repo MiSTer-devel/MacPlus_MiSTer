@@ -10,9 +10,13 @@
 // 5.20, 4.91, 4.92, 4.76 -> exponent 5.
 //
 // Q15 keeps vol=255 EXACTLY unity (32768>>15 = 1.0) so full volume is a
-// bit-perfect passthrough, and vol=0 exactly mute. A case statement (not an
-// array) guarantees Quartus builds this as logic, never an M10K -- RAM blocks
-// are the scarce resource in this design.
+// bit-perfect passthrough, and vol=0 exactly mute.
+//
+// Read this table into a REGISTER, never straight into a wire. A
+// combinational output cannot be a memory read, so it forces the whole
+// 256-way 16-bit mux into logic; given a registered output Quartus infers
+// the ROM by itself. rtl/cd_audio.sv does that, and so should any new point
+// of use.
 function [15:0] cd_vol_gain;
 	input [7:0] v;
 	begin

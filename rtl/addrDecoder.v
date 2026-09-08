@@ -81,6 +81,9 @@
 
 module addrDecoder(
 	input [1:0] configROMSize,
+	// 1 = this machine has a SCSI bus (rtl/mac_model.v). Two uses below, and
+	// see that file for why the ROM mirror is the one that actually matters.
+	input scsiPresent,
 	input [23:0] address,
 	input _cpuAS,
 	input memoryOverlayOn,
@@ -116,12 +119,24 @@ module addrDecoder(
 				end
 			end
 			4'b0100: begin //40 0000 - 4F FFFF
-				if(configROMSize[1] || address[17] == 1'b0)   // <- this detects SCSI (on Plus)!!!
+				// This is the SCSI detection, per the memory map at the top of
+				// this file: "If ROM is mirrored when A17 is 1, then SCSI is
+				// assumed to be unavailable". The Plus ROM reads $420000 and
+				// $440000 and compares them ($4003E4) -- A17 is the only thing
+				// that differs -- and stores the verdict in $0B22 bit 7, which
+				// gates every later SCSI access. So a machine declares "no SCSI"
+				// by MIRRORING here, not by faulting: with the mirror on,
+				// addrController_top.v's A17 forcing lands both reads on ROM
+				// offset 0 and the compare sees no difference.
+				//
+				// A 512Ke runs the Plus's own 128K ROM, so this decode is the
+				// ONLY thing that can tell the two machines apart.
+				if(configROMSize[1] || address[17] == 1'b0 || !scsiPresent)
 					selectROM = !_cpuAS;
 				selectSEOverlay = !_cpuAS;
 			end
 			4'b0101: begin //50 000 - 5F FFFF
-				if (address[19]) // 58 000 - 5F FFFF
+				if (address[19] && scsiPresent) // 58 000 - 5F FFFF
 					selectSCSI = !_cpuAS;
 				selectSEOverlay = !_cpuAS;
 			end

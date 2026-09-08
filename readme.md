@@ -8,9 +8,26 @@ I've tried to optimize the code by converting to synchronous style and fixing so
 
 * Copy the [*.rbf](https://github.com/MiSTer-devel/MacPlus_MiSTer/tree/master/releases) onto the root of SD card
 * Copy [boot0.rom & boot1.rom](https://github.com/MiSTer-devel/MacPlus_MiSTer/tree/master/releases) (Plus and SE ROM files) to MacPlus folder
+* To use the 128K or 512K models, also copy a 64K Macintosh ROM image to the MacPlus folder as boot2.rom
 * Copy disk images in dsk format (e.g. Disk605.dsk) to MacPlus folder
 
 After a few seconds, the floppy disk icon should appear. Open the on-screen display using the F12 key and select the a disk image. The disk image mounts as a block device and is available to the Mac almost immediately. If a bootable system is found on disk, a smiling Mac icon will appear. MacPlus will then begin booting into the desktop.
+
+## Models
+
+The "Model" entry in the on-screen display selects Plus, SE, 512K, 128K or 512Ke. The selection takes effect on "Reset & Apply CPU+Memory".
+
+| Model | ROM file | ROM | RAM | Floppy drive | SCSI |
+| --- | --- | --- | --- | --- | --- |
+| Plus | boot0.rom | 128K | 1MB or 4MB | 800K double-sided | yes |
+| SE | boot1.rom | 256K | 1MB or 4MB | 800K double-sided | yes |
+| 512Ke | boot0.rom | 128K | 512K | 800K double-sided | no |
+| 512K | boot2.rom | 64K | 512K | 400K single-sided | no |
+| 128K | boot2.rom | 64K | 128K | 400K single-sided | no |
+
+RAM was soldered down on the 128K, 512K and 512Ke, so only the Plus and the SE honour the "Memory" option; it is greyed out on the others. The SCSI, CD-ROM and CD Volume entries are greyed out in the same way on a model that has no SCSI bus.
+
+The 128K and 512K shipped a mechanically single-sided 400K drive, so 800K (819,200-byte) floppy images are refused on those two models - use 400K (409,600-byte) images. Their 64K ROM also predates HFS, so their disks must be MFS.
 
 ## Floppy disk support
 
@@ -40,6 +57,18 @@ A matching harddisk image file can be found [here](https://github.com/MiSTer-dev
 
 A tool to create harddisk images (with working SCSI driver and partition table) is available [here](https://diskjockey.onegeekarmy.eu/).
 
+## Apple HD 20 support
+
+An Apple HD 20 - the DCD (Directly Connected Disk) drive that hangs off the external floppy port rather than the SCSI bus - is emulated and selected from the "Mount HD20" entry in the on-screen display. It takes the same .img or .vhd image format as the SCSI disks, is readable and writable, and honours an image marked read-only on the SD card.
+
+Mounting an HD20 replaces the external floppy drive for as long as it is mounted, exactly as connecting one did on real hardware.
+
+The drive is the same on every model; what differs is the Mac-side driver. A Plus or a 512Ke carries the DCD driver in its 128K ROM and boots straight from an HD20. A 512K needs Apple's "Hard Disk 20" startup floppy, which patches the driver in at boot, and that floppy also expects a System Folder on the HD20 itself. A 128K cannot load the patch and will not mount an HD20.
+
+The 20MB of the original drive is not a limit here: the protocol carries 24-bit block numbers, so the capacity is whatever the mounted image holds, up to HFS's own 2GB ceiling.
+
+Two details differ from a real HD 20. The 20 file-system tag bytes each block carried on the platter are returned as zeros, since a plain disk image has nowhere to store them; the Mac copies them but does not check them. And Write-Verify is served as a plain write - there is no platter to read back from, so the read-back would only compare the sector buffer against itself.
+
 ## CD-ROM support
 
 A SCSI CD-ROM drive is emulated at SCSI ID 3, selected from the "Mount CD-ROM" entry in the on-screen display. ISO, TOAST, CUE/BIN and CHD images are accepted. The drive presents the disc as a single data track of 2048-byte blocks, which is what an AppleCD SC returned and what the Mac's CD-ROM driver expects.
@@ -64,7 +93,7 @@ The CPU model can be set to 68000, 68010 or 68020. Note that this also swaps the
 
 ## Memory
 
-1MB and 4MB memory configurations are available. Cold boot with 4MB RAM selected takes some time before it starts to boot from FDD/SCSI, so be patient. Warm boot won't take as long.
+1MB and 4MB memory configurations are available on the Plus and the SE; the other models had their RAM soldered down and always report their own size. Cold boot with 4MB RAM selected takes some time before it starts to boot from FDD/SCSI, so be patient. Warm boot won't take as long.
 
 ## Keyboard
 

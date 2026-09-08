@@ -53,6 +53,8 @@ module iwm
 	input [1:0] insertDisk,
 	output [1:0] diskEject,
 	input [1:0] diskSides,
+	input drive800k, // drive MECHANISM: see floppy.v's port comment
+	input [8:0] disk_pwm, // spindle duty INDEX 0..399: see floppy.v's tachometer
 	
 	output [1:0] diskMotor,
 	output [1:0] diskAct,
@@ -75,6 +77,20 @@ module iwm
 	output [15:0] dskWriteDataExt,
 	output        dskWriteReqExt,
 	input         dskWriteAckExt,
+
+	// DCD (Apple HD20) on the external drive port. One hps_io block-device
+	// slot, passed straight through to rtl/dcd.v.
+	output [31:0] dcd_sd_lba,
+	output        dcd_sd_rd,
+	output        dcd_sd_wr,
+	input         dcd_sd_ack,
+	input   [7:0] dcd_sd_buff_addr,
+	input  [15:0] dcd_sd_buff_dout,
+	output [15:0] dcd_sd_buff_din,
+	input         dcd_sd_buff_wr,
+	input         dcd_img_mounted,
+	input  [63:0] dcd_img_size,
+	input         dcd_img_readonly,
 
 	// SD persistence tap, per drive - see floppy.v's dskCommit* ports
 	output        dskCommitDoneInt,
@@ -113,7 +129,11 @@ module iwm
 	wire senseInt = readDataInt[7]; // bit 7 doubles as the sense line here
 	wire newByteReadyExt;
 	wire [7:0] readDataExt;
-	wire senseExt = readDataExt[7]; // bit 7 doubles as the sense line here
+	// senseExt is muxed with the DCD's line below, next to the readData mux it
+	// belongs with - see readDataExtSel.
+	// A DCD image is mounted (rtl/dcd.v's `present`). Declared here because
+	// floppyExt's enable below uses it; the DCD is instantiated further down.
+	wire dcdPresent;
 
 	// write path: which drive's data register a CPU write targets follows
 	// selectExternalDriveNext, mirroring q7Next/q6Next's use below for the
@@ -122,6 +142,25 @@ module iwm
 	                    ({q7Next, q6Next} == 2'b11) && (diskEnableExt | diskEnableInt);
 	wire writeReqInt = cen && dataRegWrite && !selectExternalDriveNext;
 	wire writeReqExt = cen && dataRegWrite &&  selectExternalDriveNext;
+
+	// THE DCD NEEDS AN EDGE, NOT A LEVEL. dataRegWrite is a level on _cpuLDS,
+	// which fx68k holds for three CPU clock periods and so three cen samples.
+	// floppy.v never noticed because it refuses a writeReq while its 16 us
+	// write-busy is set; dcd_link.v has no such interlock and would take each
+	// pulse as a new byte, so $AA $81 $B1 arrives as $AA $AA $AA $81 $81 $81.
+	//
+	// An edge is safe because consecutive data-register writes are always
+	// separated by the handshake read at $1800 ($419AE8), which drops
+	// dataRegWrite in between. The floppy's writeReqExt above is left alone.
+	reg dataRegWriteSeen;
+	always @(posedge clk or negedge _reset) begin
+		if (_reset == 1'b0)
+			dataRegWriteSeen <= 1'b0;
+		else if (cen)
+			dataRegWriteSeen <= dataRegWrite;
+	end
+	wire writeReqDcd = cen && dataRegWrite && !dataRegWriteSeen &&
+	                   selectExternalDriveNext;
 
 	wire writeBusyInt, writeUnderrunInt;
 	wire writeBusyExt, writeUnderrunExt;
@@ -149,6 +188,8 @@ module iwm
 		.newByteReady(newByteReadyInt),
 		.insertDisk(insertDisk[0]),
 		.diskSides(diskSides[0]),
+		.drive800k(drive800k),
+		.disk_pwm(disk_pwm),
 		.diskEject(diskEject[0]),
 
 		.motor(diskMotor[0]),
@@ -186,13 +227,21 @@ module iwm
 		.ca2(ca2),
 		.SEL(SEL),
 		.lstrb(lstrb),
-		._enable(~diskEnableExt),
+		// HELD DISABLED WHILE A DCD IMAGE IS MOUNTED. The DCD takes over the
+		// readData/newByteReady/sense mux below, but writeReqExt and the PH3
+		// strobes would still reach this floppy - writing the DCD's command
+		// bytes onto a mounted floppy's track 0, and ejecting it on the ROM's
+		// chain walk. floppy.v ignores all three while _enable is high, so this
+		// one term closes them. With no DCD mounted it is ~diskEnableExt.
+		._enable(~(diskEnableExt & ~dcdPresent)),
 		.writeData(dataInLo), // see floppyInt's writeData comment above
 		.readData(readDataExt),
 		.advanceDriveHead(advanceDriveHead),
 		.newByteReady(newByteReadyExt),
 		.insertDisk(insertDisk[1]),
 		.diskSides(diskSides[1]),
+		.drive800k(drive800k),
+		.disk_pwm(disk_pwm),
 		.diskEject(diskEject[1]),
 
 		.motor(diskMotor[1]),
@@ -218,8 +267,76 @@ module iwm
 		.dskCommitBufData(dskCommitBufDataExt)
 	);
 
-	wire [7:0] readData = selectExternalDrive ? readDataExt : readDataInt;
-	wire newByteReady = selectExternalDrive ? newByteReadyExt : newByteReadyInt;
+	// ------------------------------------------------------------------
+	// DCD (Apple HD20)
+	// ------------------------------------------------------------------
+	// A DCD device is a PEER of floppy.v on this same byte interface: the
+	// corrected DB-19 pinout puts it on the ordinary RD/WR pins with /ENBL2 as
+	// its enable, so it hangs off the EXTERNAL drive port and only PH0-PH2 are
+	// repurposed, from a drive-register address into a handshake state bus.
+	//
+	// IT REPLACES THE EXTERNAL FLOPPY RATHER THAN CHAINING WITH IT, and only
+	// while a DCD image is mounted. A real HD20 daisy-chains a floppy behind
+	// itself (PH3 selects down the chain, which is why rtl/dcd_link.v takes
+	// lstrb at all); we do not, so mounting an HD20 costs the external floppy.
+	// It keeps the property that matters more: with no DCD image mounted the
+	// external port is bit-identical to what it has always been.
+	//
+	// "Replaces" is enforced at floppyExt's _enable above, not only at the read
+	// mux below, so the external floppy never sees /ENBL2 while dcdPresent.
+	// _iwmBusy stays the floppy's writeBusyExt, which floppy.v holds at 0 while
+	// disabled - "ready", which is what a DCD wants to see.
+	wire  [7:0] readDataDcd;
+	wire        newByteReadyDcd;
+
+	dcd dcd0
+	(
+		.clk(clk),
+		.cep(cep),
+		.cen(cen),
+		.turbo(turbo),
+		._reset(_reset),
+		.ca0(ca0),
+		.ca1(ca1),
+		.ca2(ca2),
+		.lstrb(lstrb),
+		._enable(~diskEnableExt),
+		.writeData(dataIn[7:0]),
+		.writeReq(writeReqDcd), // one-shot: see dataRegWriteSeen above
+		.readData(readDataDcd),
+		.newByteReady(newByteReadyDcd),
+		.sd_lba(dcd_sd_lba),
+		.sd_rd(dcd_sd_rd),
+		.sd_wr(dcd_sd_wr),
+		.sd_ack(dcd_sd_ack),
+		.sd_buff_addr(dcd_sd_buff_addr),
+		.sd_buff_dout(dcd_sd_buff_dout),
+		.sd_buff_din(dcd_sd_buff_din),
+		.sd_buff_wr(dcd_sd_buff_wr),
+		.img_mounted(dcd_img_mounted),
+		.img_size(dcd_img_size),
+		.img_readonly(dcd_img_readonly),
+		.present(dcdPresent)
+	);
+
+	wire [7:0] readDataExtSel      = dcdPresent ? readDataDcd     : readDataExt;
+	wire       newByteReadyExtSel  = dcdPresent ? newByteReadyDcd : newByteReadyExt;
+
+	// THE SENSE LINE HAS TO COME THROUGH THE SAME MUX AS THE DATA. Taking it
+	// from readDataExt[7] unconditionally - i.e. the external FLOPPY's, always
+	// - is enough on its own to hide the DCD completely.
+	// The status register (Q7=0, Q6=1) is where both programs that look for a
+	// DCD look: the ROM's ID probe at $418600 and HD Diag's `tst.b $1c00(a2)`
+	// at $D938. With the floppy answering, state 7 returns its INSTALLED
+	// register - 0 - and the probe fails at $418634's `bpl`.
+	//
+	// Taking bit 7 of readDataExtSel rather than a second copy of the mux keeps
+	// the two in step by construction, and with nothing mounted it reduces to
+	// readDataExt[7] exactly.
+	wire senseExt = readDataExtSel[7];
+
+	wire [7:0] readData = selectExternalDrive ? readDataExtSel : readDataInt;
+	wire newByteReady = selectExternalDrive ? newByteReadyExtSel : newByteReadyInt;
 	
 	// NOTE: iwmMode is DEAD - it is written below and read back in the status
 	// register, but no bit of it affects behaviour anywhere. In particular

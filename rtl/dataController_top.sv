@@ -82,6 +82,7 @@ module dataController_top(
 	output memoryOverlayOn,
 	input [1:0] insertDisk,
 	input [1:0] diskSides,
+	input drive800k, // drive MECHANISM: see floppy.v's port comment
 	output [1:0] diskEject,
 	output [1:0] diskMotor,
 	output [1:0] diskAct,
@@ -127,7 +128,22 @@ module dataController_top(
 	input             [4:0] sd_buff_addr_hi,  // hps_io addr[12:8], CD-DA frames
 	input            [15:0] sd_buff_dout,
 	output           [15:0] sd_buff_din[SCSI_DEVS],
-	input                   sd_buff_wr
+	input                   sd_buff_wr,
+
+	// DCD (Apple HD20) on the external drive port.
+	// Its own hps_io slot, kept out of the SCSI arrays above because it is not
+	// a SCSI device and does not share their indexing.
+	output           [31:0] dcd_sd_lba,
+	output                  dcd_sd_rd,
+	output                  dcd_sd_wr,
+	input                   dcd_sd_ack,
+	input             [7:0] dcd_sd_buff_addr,
+	input            [15:0] dcd_sd_buff_dout,
+	output           [15:0] dcd_sd_buff_din,
+	input                   dcd_sd_buff_wr,
+	input                   dcd_img_mounted,
+	input            [63:0] dcd_img_size,
+	input                   dcd_img_readonly
 );
 	
 	parameter SCSI_DEVS = 2;
@@ -158,6 +174,20 @@ module dataController_top(
 	// The one-sample latency (audio_prebuf contains sample[N-1] when addr advances
 	// to N) is a constant delay, inaudible, and matches real hardware where the
 	// sample is read and used within the same line period.
+	// Spindle duty for a 400K drive, computed in rtl/disk_pwm_duty.v exactly
+	// as the hardware does it: low 6 bits -> 64-entry conversion table ->
+	// sum of 100 -> /10 - 11, clamped 0..399. It is a separate module
+	// because this file instantiates VHDL and so cannot be elaborated by a
+	// Verilog-only tool.
+	wire [8:0] disk_pwm;
+	disk_pwm_duty disk_pwm_duty_inst
+	(
+		.clk        ( clk32 ),
+		.sample_en  ( clk8_en_p && loadSoundD ),
+		.sample     ( memoryDataIn[5:0] ),
+		.duty_index ( disk_pwm )
+	);
+
 	reg [7:0] audio_prebuf;
 	reg [7:0] audio_sample;
 
@@ -490,6 +520,8 @@ module dataController_top(
 		.dataOut(iwmDataOut),
 		.insertDisk(insertDisk),
 		.diskSides(diskSides),
+		.drive800k(drive800k),
+		.disk_pwm(disk_pwm),
 		.diskEject(diskEject),
 		.diskMotor(diskMotor),
 		.diskAct(diskAct),
@@ -519,7 +551,19 @@ module dataController_top(
 		.dskCommitAddrExt(dskCommitAddrExt),
 		.dskCommitBufWrExt(dskCommitBufWrExt),
 		.dskCommitBufAddrExt(dskCommitBufAddrExt),
-		.dskCommitBufDataExt(dskCommitBufDataExt)
+		.dskCommitBufDataExt(dskCommitBufDataExt),
+
+		.dcd_sd_lba(dcd_sd_lba),
+		.dcd_sd_rd(dcd_sd_rd),
+		.dcd_sd_wr(dcd_sd_wr),
+		.dcd_sd_ack(dcd_sd_ack),
+		.dcd_sd_buff_addr(dcd_sd_buff_addr),
+		.dcd_sd_buff_dout(dcd_sd_buff_dout),
+		.dcd_sd_buff_din(dcd_sd_buff_din),
+		.dcd_sd_buff_wr(dcd_sd_buff_wr),
+		.dcd_img_mounted(dcd_img_mounted),
+		.dcd_img_size(dcd_img_size),
+		.dcd_img_readonly(dcd_img_readonly)
 	);
 
 	// SCC
