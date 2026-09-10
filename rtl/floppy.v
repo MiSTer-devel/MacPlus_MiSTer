@@ -81,15 +81,15 @@ module floppy
 	// three terms of doubleSidedDisk below, and only one - on its own it
 	// says nothing about the geometry of the volume inside the file.
 	input img800k,
-	// The DRIVE's capability, not the media's: 1 = 800K double-sided
+	// The drive's capability, not the media's: 1 = 800K double-sided
 	// mechanism, 0 = 400K single-sided. Constant per model (rtl/mac_model.v),
 	// unlike img800k above, which describes whichever image is mounted.
 	input drive800k,
-	// What the MEDIUM said at mount time, sniffed out of its own volume
+	// What the medium said at mount time, sniffed out of its own volume
 	// header by floppy_loader.v: 1 = the volume is double-sided, or the
 	// image carries nothing recognisable. See doubleSidedDisk below.
 	input mediaSides,
-	// Spindle duty INDEX, 0..399, computed by dataController_top.sv exactly as
+	// Spindle duty index, 0..399, computed by dataController_top.sv exactly as
 	// the hardware does: low 6 bits -> 64-entry table -> sum of 100 -> /10 - 11.
 	// duty%% = index/4.19. Only a 400K mechanism obeys it; see the tachometer.
 	input [8:0] disk_pwm,
@@ -197,44 +197,37 @@ module floppy
 	// ---------------------------------------------------------------------
 	// Is this a double-sided diskette?
 	//
-	// This one wire decides both halves of the geometry - where a sector
-	// lives in the image (the soff/spt arithmetic in the encoder and the
-	// decoder) and the FORMAT byte the encoder puts in every address field,
-	// which is what the .Sony driver reads the geometry back out of. They
-	// have to be the same answer or the driver builds a volume the core
-	// then addresses differently, which is exactly the defect this phase
-	// fixes.
+	// This one wire decides both halves of the geometry: where a sector lives
+	// in the image (the soff/spt arithmetic in the encoder and the decoder)
+	// and the format byte the encoder puts in every address field, which is
+	// where the .Sony driver reads the geometry back out of. The two have to
+	// be the same answer, or the driver builds a volume the core then
+	// addresses differently.
 	//
-	// Every 3.5" diskette of the era was one medium; 400K vs 800K was a
+	// Every 3.5in diskette of the era was one medium; 400K against 800K was a
 	// formatting choice, not a property of the disk. So three terms, each a
-	// CEILING on the ones after it:
+	// ceiling on the ones after it:
 	//
-	//   drive800k  a 400K mechanism has one head. Whatever is on the disk,
-	//              this machine sees side 0 and nothing else, and the ROM
-	//              judges what it finds - which is what a real 400K drive
-	//              does with an 800K diskette put into it.
+	//   drive800k  a 400K mechanism has one head, so this machine sees side 0
+	//              and lets the ROM judge what it finds.
 	//   img800k    a 409,600-byte file cannot hold a double-sided volume
-	//              however it is formatted. Without this a format burst
-	//              claiming two sides would send side 1's sectors past the
-	//              end of the file, where floppy_sd_writer.v drops them.
-	//              It is also what keeps a Two-Sided erase of a 400K image
-	//              producing an ordinary 400K volume, as it does today.
-	//   the medium itself, which speaks twice: through the volume it
-	//              already carries (mediaSides, sniffed at mount) and,
-	//              from the moment a format overwrites that volume, through
-	//              the format byte of the track being laid down.
+	//              however it is formatted; without it a format claiming two
+	//              sides would send side 1 past the end of the file. It also
+	//              keeps a Two-Sided erase of a 400K image producing an
+	//              ordinary 400K volume.
+	//   the medium which speaks through the volume it already carries
+	//              (mediaSides, sniffed at mount) and, once a format
+	//              overwrites that volume, through the format byte of the
+	//              track being laid down.
 	//
-	// The latch below is why the two never disagree. A format happens after
-	// a mount, so within a session it wins; at the next mount the sniff
-	// reads the volume this format wrote, so the two agree by construction.
-	// Reporting one geometry at format time and the other at the next mount
-	// is precisely how you manufacture a disk that needs repairs.
+	// The latch below is why the last two never disagree: a format happens
+	// after a mount, so within a session it wins, and at the next mount the
+	// sniff reads the volume that format wrote.
 	reg fmtSeen; // an address field's format byte has been read since the mount
 	reg fmtDs;
 	always @(posedge clk) begin
 		// Cleared with the decoder that feeds it, on the same eject/mount
-		// events - a latch that outlived its medium would be worse than no
-		// latch at all.
+		// events: a latch must not outlive its medium.
 		if (!_reset || writePathReset) begin
 			fmtSeen <= 1'b0;
 			fmtDs   <= 1'b0;
@@ -383,25 +376,16 @@ module floppy
 	end
 
 	// The write as a whole, for the encoder's format relay (see
-	// floppy_track_encoder.v's header): a burst runs from the first byte
-	// the IWM hands over until it has left write mode AND the last byte has
-	// left the pacer. Between bytes writeBusyReg drops for a few clocks
-	// while the Mac refills the IWM, so the end is taken from Q7 and the
-	// pacer together, never from the pacer alone.
+	// floppy_track_encoder.v's header): a burst runs from the first byte the
+	// IWM hands over until it has left write mode and the last byte has left
+	// the pacer. Between bytes writeBusyReg drops for a few clocks while the
+	// Mac refills the IWM, so the end is taken from Q7 and the pacer together.
 	//
-	// wrEnd is that end delayed by two clocks. The pacer hands its last byte
-	// to the decoder (decReady) on the same edge that clears writeBusyReg;
-	// the decoder consumes it a clock later and reports an address mark a
-	// clock after that. The encoder must hear of that mark BEFORE it hears
-	// the burst is over, or a write ending on a mark's sector byte would
-	// relay to the wrong place. With cep every fourth clock, as on hardware,
-	// the next cep sample is already late enough and the delay changes
-	// nothing; it is what keeps the order when cep is held high every clock.
-	// Two clocks covers any spacing.
-	//
-	// A disk change ends a burst too: an eject or remount mid-format must
-	// not leave the relay armed for the departing disk and fire it on the
-	// next disk's first ordinary write.
+	// wrEnd is that end delayed by two clocks, so the encoder hears of an
+	// address mark before it hears the burst is over: the pacer hands its last
+	// byte to the decoder on the edge that clears writeBusyReg, and the mark
+	// is reported two clocks after that. A disk change ends a burst too, so
+	// the relay cannot stay armed for a departing disk.
 	reg  wrBusyPrev, wrEndD1, wrEnd;
 	wire wrBusy = (writeMode && _enable == 1'b0) || writeBusyReg;
 	always @(posedge clk or negedge _reset) begin
