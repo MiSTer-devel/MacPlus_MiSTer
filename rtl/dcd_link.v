@@ -122,8 +122,13 @@ module dcd_link
 
 	input         _reset,
 
-	// phase lines from the IWM. lstrb is PH3 (daisy-chain select); with a
-	// single device it only has to not break the ID probe.
+	// phase lines from the IWM. lstrb is PH3, the daisy-chain select, and it
+	// is DELIBERATELY UNUSED HERE: the flow-through flip-flop lives in
+	// iwm.v (see its "DAISY CHAIN" block), so a hand-over reaches this file
+	// as _enable going high, and being deselected is the only thing this
+	// layer needs to know. The port is kept because the signal really is on
+	// the pin, and because reading it here instead would mean duplicating
+	// iwm.v's ownership rule in a second place.
 	input         ca0,
 	input         ca1,
 	input         ca2,

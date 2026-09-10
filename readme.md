@@ -27,7 +27,7 @@ The "Model" entry in the on-screen display selects Plus, SE, 512K, 128K or 512Ke
 
 RAM was soldered down on the 128K, 512K and 512Ke, so only the Plus and the SE honour the "Memory" option; it is greyed out on the others. The SCSI, CD-ROM and CD Volume entries are greyed out in the same way on a model that has no SCSI bus.
 
-The 128K and 512K shipped a mechanically single-sided 400K drive, so 800K (819,200-byte) floppy images are refused on those two models - use 400K (409,600-byte) images. Their 64K ROM also predates HFS, so their disks must be MFS.
+The 128K and 512K shipped a mechanically single-sided 400K drive, so they see every disk as single-sided. An 819,200-byte image still mounts on them and is read as its first side, which is what a real 400K drive does with an 800K diskette put into it - the ROM reads what it can and offers to initialise the disk. Their 64K ROM also predates HFS, so their disks must be MFS.
 
 ## Floppy disk support
 
@@ -36,6 +36,8 @@ Internal and external floppy disk drives are both supported. The first and secon
 Floppy disk images need to be in raw disk format (a.k.a. DiskDup format) with a .dsk extension. Single-sided 400k disk images must be exactly 409,600 bytes in size. Double-sided 800k disk images must be exactly 819,200 bytes in size.  Disk Copy 4.2 files are not currently supported. They are largely the same as raw disk format, but include an additional 84-byte header. A tool to convert DC42 format to dsk is available [here](https://www.bigmessowires.com/2013/12/16/macintosh-diskcopy-4-2-floppy-image-converter/).
 
 Floppy disk images are writable, gated by the "Floppy Write" entry in the on-screen display (defaults to Off/protected - writes must be explicitly enabled). A disk image that is itself marked read-only on the SD card is always honoured as write-protected, regardless of this setting. Writes commit back to the exact .dsk file on the SD card and survive eject/remount and a full power cycle.
+
+Disks can also be erased and reformatted from inside the Mac (Special > Erase Disk), on either drive and in both the One-Sided and Two-Sided variants. What a disk *is* follows what was last formatted onto it rather than the size of the file holding it, as on real hardware - 400k and 800k were formatting choices made on identical media, and nothing on a diskette records which it was. So an 819,200-byte image erased One-Sided becomes a 400k volume, and erasing it Two-Sided later makes it an 800k one again. A 409,600-byte image is always a 400k disk, having nowhere to put a second side, and the 128K and 512K see every image as single-sided because their drives have only one head. One consequence worth knowing: erasing an 800k image as One-Sided leaves the old contents of the file's second half in the file. The Mac cannot see or reach them - the new volume occupies the first 409,600 bytes and nothing addresses past that - but they are still there if you inspect the .dsk offline.
 
 Floppy disk images cannot be loaded while the Mac accesses a floppy disk. Thus, it's recommended to wait for the desktop to appear until a second floppy can be inserted. Before loading a different disk image, it's recommended to eject the previously inserted disk image from within the OS - this now matters for data integrity, not just stability, since an image can be actively written to.
 
@@ -61,7 +63,9 @@ A tool to create harddisk images (with working SCSI driver and partition table) 
 
 An Apple HD 20 - the DCD (Directly Connected Disk) drive that hangs off the external floppy port rather than the SCSI bus - is emulated and selected from the "Mount HD20" entry in the on-screen display. It takes the same .img or .vhd image format as the SCSI disks, is readable and writable, and honours an image marked read-only on the SD card.
 
-Mounting an HD20 replaces the external floppy drive for as long as it is mounted, exactly as connecting one did on real hardware.
+A floppy drive can be daisy-chained behind the HD 20, as on real hardware - the shipping drive had a floppy connector on its back panel - so the internal floppy, the HD 20 and an external floppy are all usable at once.
+
+The Mac reaches a chained floppy only by walking the chain, and only its DCD driver does that. Mount an HD 20 and then boot a System that has no HD 20 driver, and the external floppy cannot be addressed at all until the HD 20 is unmounted. A real machine behaved the same way; there the remedy was to unplug the drive.
 
 The drive is the same on every model; what differs is the Mac-side driver. A Plus or a 512Ke carries the DCD driver in its 128K ROM and boots straight from an HD20. A 512K needs Apple's "Hard Disk 20" startup floppy, which patches the driver in at boot, and that floppy also expects a System Folder on the HD20 itself. A 128K cannot load the patch and will not mount an HD20.
 

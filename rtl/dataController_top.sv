@@ -81,8 +81,9 @@ module dataController_top(
 	// misc
 	output memoryOverlayOn,
 	input [1:0] insertDisk,
-	input [1:0] diskSides,
-	input drive800k, // drive mechanism: see floppy.v's port comment
+	input [1:0] img800k,    // mounted FILE is 819,200 bytes: see floppy.v's port comment
+	input drive800k,        // drive MECHANISM: see floppy.v's port comment
+	input [1:0] mediaSides, // what the MEDIUM said at mount: see floppy.v
 	output [1:0] diskEject,
 	output [1:0] diskMotor,
 	output [1:0] diskAct,
@@ -517,8 +518,9 @@ module dataController_top(
 		.driveSel(driveSel),
 		.dataOut(iwmDataOut),
 		.insertDisk(insertDisk),
-		.diskSides(diskSides),
+		.img800k(img800k),
 		.drive800k(drive800k),
+		.mediaSides(mediaSides),
 		.disk_pwm(disk_pwm),
 		.diskEject(diskEject),
 		.diskMotor(diskMotor),
