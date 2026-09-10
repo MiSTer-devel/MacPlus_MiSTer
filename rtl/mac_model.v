@@ -29,7 +29,7 @@ module mac_model
 	// slot numbers as Main_MiSTer packs them in ioctl_index[7:6]
 	localparam [1:0] ROM_SLOT_PLUS = 2'd0; // releases/boot0.rom, 128K
 	localparam [1:0] ROM_SLOT_SE   = 2'd1; // releases/boot1.rom, 256K
-	localparam [1:0] ROM_SLOT_64K  = 2'd2; // releases/boot2.rom, user's choice of 64K image
+	localparam [1:0] ROM_SLOT_64K  = 2'd2; // releases/boot2.rom, 64K
 
 	always @(*) begin
 		case (model)

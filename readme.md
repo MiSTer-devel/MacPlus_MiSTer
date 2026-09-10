@@ -8,7 +8,7 @@ I've tried to optimize the code by converting to synchronous style and fixing so
 
 * Copy the [*.rbf](https://github.com/MiSTer-devel/MacPlus_MiSTer/tree/master/releases) onto the root of SD card
 * Copy [boot0.rom & boot1.rom](https://github.com/MiSTer-devel/MacPlus_MiSTer/tree/master/releases) (Plus and SE ROM files) to MacPlus folder
-* To use the 128K or 512K models, also copy a 64K Macintosh ROM image to the MacPlus folder as boot2.rom
+* To use the 128K or 512K models, also copy [boot2.rom](https://github.com/MiSTer-devel/MacPlus_MiSTer/tree/master/releases) (64K ROM file) to MacPlus folder
 * Copy disk images in dsk format (e.g. Disk605.dsk) to MacPlus folder
 
 After a few seconds, the floppy disk icon should appear. Open the on-screen display using the F12 key and select the a disk image. The disk image mounts as a block device and is available to the Mac almost immediately. If a bootable system is found on disk, a smiling Mac icon will appear. MacPlus will then begin booting into the desktop.
