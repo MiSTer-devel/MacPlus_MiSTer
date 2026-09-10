@@ -1,12 +1,8 @@
-/* dcd_link.v - DCD (Directly Connected Disk / Apple HD20) link layer.
+/* dcd_link.v - DCD (Directly Connected Disk / Apple HD20) link layer:
+   phase-line states, /HSHK, 7-for-8 group coding and checksum. The command
+   layer is rtl/dcd.v.
 
-   Phase-line state decode, the identification states, /HSHK, and 7-for-8
-   group coding in both directions with the checksum. The command layer is
-   rtl/dcd.v.
-
-   A DCD device sits on the external drive port beside the Sony drive, on
-   the ordinary RD/WR pins with /ENBL2 as its enable. PH0-PH2 carry a 3-bit
-   state instead of a register address, and only the settled value counts:
+   State {ca2,ca1,ca0}, on the external drive port with /ENBL2 as enable:
 
         7  ID: sense 1   drive connected
         6  ID: sense 1
@@ -17,24 +13,16 @@
         1  data mode: readData carries the transmitted bytes
         0  hold-off
 
-   /HSHK is idle-high and driven from both sides: the drive asserts it to
-   accept a command and to offer a reply. Every transmitted byte has its MSB
-   set, which is the IWM's data-ready signal.
-
-   Framing:
+   /HSHK is idle-high, asserted by the drive to accept a command and to
+   offer a reply. Transmitted bytes have the MSB set (the IWM's data-ready).
 
      Mac -> drive:  <$AA> <txGroups|$80> <rxGroups|$80> then groups of 8,
                     LSB byte first followed by 7 data bytes
-     drive -> Mac:  <$AA> then groups of 8, 7 data bytes followed by the
-                    LSB byte last
+     drive -> Mac:  <$AA> then groups of 8, 7 data bytes then the LSB byte
 
      transmitted[i] = $80 | (data[i] >> 1)
      lsbByte        = $80 | (L0<<0 | L1<<1 | ... | L6<<6)   Ln = data[n] & 1
-
-   Checksum: the 8-bit sum of the data bytes, sent negated, so the receiver's
-   running sum over the frame including the checksum is zero. The count bytes
-   and the checksum are not in Apple's document; they follow the Plus ROM's
-   driver.
+     checksum       = -(sum of data bytes), last byte of the last group
 */
 
 module dcd_link
@@ -43,8 +31,7 @@ module dcd_link
 	input         cep,
 	input         cen,
 
-	// the byte interval tracks CPU speed: the Mac's byte-poll budget is
-	// shared across a group and runs out at 16 MHz otherwise
+	// byte interval tracks CPU speed (the Mac's poll budget runs out at 16 MHz)
 	input         turbo,
 
 	input         _reset,
@@ -63,9 +50,7 @@ module dcd_link
 
 	input         present,      // a DCD image is mounted
 
-	// ---- command layer above ----
-	// the received payload, presented for one clock with rxValid (good
-	// checksum) or rxBad; byte 0 in the low bits
+	// received payload, one clock, with rxValid (checksum good) or rxBad
 	output reg [63:0] rxBuf,
 	output reg  [3:0] rxLen,
 	output reg        rxValid,
@@ -74,21 +59,16 @@ module dcd_link
 	// groups the Mac asked to receive back, from the second count byte
 	output reg  [6:0] rxRspGroups,
 
-	// every decoded payload byte as it arrives, for a write's 538 bytes;
-	// rxStbAddr counts from the first byte after the count bytes
+	// each decoded payload byte as it arrives (a write does not fit rxBuf)
 	output reg        rxStb,
 	output reg  [7:0] rxStbData,
 	output reg  [9:0] rxStbAddr,
 
-	// high while the Mac holds the reset state; the command layer must
-	// abandon any command in flight
+	// Mac holds the reset state; abandon any command in flight
 	output            dcdReset,
 
-	// Reply: txArm (level) claims /HSHK as soon as a command is accepted,
-	// since the Mac checks the sense line at once; txReq (pulse) says the
-	// payload behind txData/txLen is ready. txLen excludes the checksum and
-	// txLen+1 must be a multiple of 7, so the checksum lands in the last
-	// slot of the last group.
+	// txArm (level) claims /HSHK when a command is accepted; txReq (pulse)
+	// sends txLen payload bytes then the checksum. txLen+1 is a multiple of 7.
 	input             txArm,
 	input             txReq,
 	input       [7:0] txData,    // payload byte selected by txAddr
@@ -100,7 +80,7 @@ module dcd_link
 	output reg        txAbort
 );
 
-	// sync byte, both directions (the ROM never sends the document's $96)
+	// sync byte, both directions
 	localparam [7:0] SYNC = 8'hAA;
 
 	// 2 us per bit, as floppy.v
@@ -111,9 +91,7 @@ module dcd_link
 
 	assign dcdReset = selected & (state == 3'd4);
 
-	// Command handshake, separate from the transmit FSM. Arming requires
-	// passing through idle first, since state 3 occurs at both ends of an
-	// exchange.
+	// command handshake; arming requires passing through idle (state 2)
 	localparam RXH_IDLE  = 3'd0, RXH_ARMED = 3'd1, RXH_READY = 3'd2,
 	           RXH_DATA  = 3'd3, RXH_DONE  = 3'd4;
 	reg [2:0] rxHs;
@@ -121,10 +99,7 @@ module dcd_link
 	// a reply request is held until the bus is idle (state 2)
 	reg txPend;
 
-	// ------------------------------------------------------------------
-	// Sense
-	// ------------------------------------------------------------------
-	// With nothing mounted every ID state reads 1, as past the end of a chain.
+	// sense: with nothing mounted every ID state reads 1
 	reg hshk_n;   // 1 = de-asserted (idle), 0 = asserted
 	reg senseBit;
 
@@ -145,12 +120,8 @@ module dcd_link
 	assign readData = ((state == 3'd1 || state == 3'd0) && txBusy)
 	                  ? txByte : {senseBit, 7'b0000000};
 
-	// ------------------------------------------------------------------
-	// Receive: Mac -> drive
-	// ------------------------------------------------------------------
-	// A hold-off on this direction is not a retransmission: the Mac finishes
-	// the group in state 0, sends a filler $00, then a bare $AA and the next
-	// group.
+	// receive, Mac -> drive. A hold-off does not restart the group: the Mac
+	// sends a filler $00, then a bare $AA and the next group.
 	localparam RX_SYNC = 3'd0, RX_CNT1 = 3'd1, RX_CNT2 = 3'd2,
 	           RX_GROUP = 3'd3, RX_RESYNC = 3'd4;
 
@@ -174,9 +145,7 @@ module dcd_link
 	wire       rxTake    = writeReq & selected &
 	                       ((state == 3'd1) | (rxInFrame & (state == 3'd0)));
 
-	// ------------------------------------------------------------------
-	// Transmit: drive -> Mac
-	// ------------------------------------------------------------------
+	// transmit, drive -> Mac
 	localparam TX_IDLE = 3'd0, TX_WAIT = 3'd1, TX_SYNC = 3'd2,
 	           TX_DATA = 3'd3, TX_LSB  = 3'd4, TX_END  = 3'd5,
 	           TX_HOFF = 3'd6;
@@ -242,8 +211,7 @@ module dcd_link
 			// cleared under cen, matching the IWM's latch
 			if (cen) newByteReady <= 0;
 
-			// State 4 is a DCD reset. Kept apart from _reset so a mounted image
-			// survives it.
+			// state 4: DCD reset (kept apart from _reset so a mounted image survives)
 			if (selected && state == 3'd4) begin
 				rxState <= RX_SYNC;
 				rxIdx   <= 0;
@@ -259,8 +227,7 @@ module dcd_link
 			end
 			else begin
 
-				// Command handshake, Mac -> drive. The transmit FSM below wins
-				// on /HSHK while a reply is in flight.
+				// command handshake, Mac -> drive
 				if (txState == TX_IDLE && !txBusy) begin
 					if (!selected) begin
 						hshk_n <= 1'b1;
@@ -286,8 +253,7 @@ module dcd_link
 						end
 
 					RXH_DATA:
-						// 3: the Mac is done and waits for the release; 2: it
-						// abandoned the transfer
+						// 3: Mac done, waiting for the release; 2: transfer abandoned
 						if (state == 3'd3) begin
 							hshk_n <= 1'b1;
 							rxHs   <= RXH_DONE;
@@ -304,8 +270,7 @@ module dcd_link
 					endcase
 				end
 
-				// The Mac keeps sending the rest of a group after dropping to
-				// state 0 for a hold-off.
+				// the Mac finishes a group after dropping to state 0 for a hold-off
 				if (selected && rxState == RX_GROUP && state == 3'd0)
 					rxHoff <= 1'b1;
 
@@ -386,8 +351,7 @@ module dcd_link
 
 				case (txState)
 				TX_IDLE: begin
-					// Hold a one-clock txReq until the bus is idle. txArm is a level
-					// and would re-trigger after its own frame, so it is not latched.
+					// hold a txReq until the bus is idle; txArm is a level and is not latched
 					if (txReq && selected) txPend <= 1'b1;
 					else if (!txArm && !txGo) txPend <= 1'b0;
 
@@ -444,9 +408,7 @@ module dcd_link
 						end
 					end
 
-				// Seven data bytes, then the LSB byte. A hold-off mid-group is
-				// remembered and acted on at the group boundary; the group is
-				// finished first, as the Mac expects.
+				// seven data bytes then the LSB byte; a hold-off is acted on at the group end
 				TX_DATA: begin
 					if (state == 3'd0) txHoff <= 1'b1;
 					// states 2/3 mid-group mean the Mac has abandoned the frame
@@ -500,8 +462,7 @@ module dcd_link
 					end
 				end
 
-				// Hold-off acknowledged: release /HSHK, wait for the Mac to drop it,
-				// then resume with a fresh sync. States 2/3 mean the Mac has given up.
+				// hold-off: release /HSHK, wait for state 1, resend the sync
 				TX_HOFF:
 					if (!selected || state >= 3'd4 || state == 3'd2 || state == 3'd3) begin
 						hshk_n  <= 1'b1;
@@ -519,7 +480,7 @@ module dcd_link
 					end
 					else hshk_n <= 1'b1;
 
-				// tear down on a cen tick so the IWM latches the final byte first
+				// tear down on a cen tick so the IWM latches the last byte
 				TX_END:
 					if (cen) begin
 						hshk_n  <= 1'b1;

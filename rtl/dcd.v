@@ -1,9 +1,9 @@
 /* dcd.v - DCD (Apple HD20) device: command layer over rtl/dcd_link.v.
 
-   Implements Status ($03), MultiBlock Read ($00), MultiBlock Write ($01,
-   continued as $41) and Write-Verify ($02/$42) over rtl/dcd_disk.v. Every
-   other opcode gets an empty reply. This is the May 1985 (1.2a) revision of
-   the protocol, the one the Plus ROM implements.
+   Status ($03), MultiBlock Read ($00), MultiBlock Write ($01, continued as
+   $41) and Write-Verify ($02/$42), protocol revision 1.2a (May 1985).
+   Reply opcode = command opcode & $3F | $80; an error reply is the header
+   group alone with status $81.
 
      Status  from Mac:   <$AA> <$81> <$B1> <$03> <5 more> <CHK>   1 group
              from drive: <$AA> <$83> <blks> <stat> <pad> <pad> <pad>
@@ -22,12 +22,6 @@
              from drive: <$AA> <$80|op> <blks> <stat> <3 pad> <CHK>
                                                               1 group
 
-   The reply opcode is the command opcode masked to 6 bits with bit 7 set.
-   A write is one command per block; blocks after the first carry bit 6 and
-   no address, so the drive tracks the block number itself. The blocks-left
-   byte counts down and the reply echoes it. A read sends N frames from one
-   command. An error reply is the header group alone, status $81.
-
    Identity block (offset, size, field):
 
        0   2  Device_Type        0
@@ -39,11 +33,6 @@
       12  52  Manuf_Reserved     0
       64 256  Icon               rtl/dcd_icon.vh
      320  12  drive name         Pascal string, shown by the Finder
-
-   Capacity is the mounted image (24-bit block numbers; HFS itself stops at
-   2 GB). The 20 tag bytes are returned as zeros and Write-Verify is served
-   as a plain write, since a disk image has no platter to keep tags on or
-   read back from.
 */
 module dcd
 (
@@ -127,8 +116,7 @@ module dcd
 		.buf_addr(bufAddr), .buf_q(bufQ), .buf_d(rxStbData), .buf_we(bufWe)
 	);
 
-	// /HSHK is claimed as soon as a command is accepted and held for the
-	// whole command; a reg so it drops with the last frame
+	// /HSHK is claimed when a command is accepted and held for the whole command
 	reg         txArm;
 
 	wire [7:0]  opcode = rxBuf[7:0];
@@ -150,10 +138,7 @@ module dcd
 		.txBusy(txBusy), .txAbort(txAbort)
 	);
 
-	// ------------------------------------------------------------------
-	// Reply payload, addressed by txAddr
-	// ------------------------------------------------------------------
-	// Offsets past the end of a reply read as zero.
+	// reply payload, addressed by txAddr; offsets past the end read as zero
 
 	// the 12-byte trailer is the drive name the Finder shows
 	localparam [95:0] TRAILER = {8'd11, "MiSTer HD20"};   // Pascal string
@@ -211,13 +196,7 @@ module dcd
 		else                       txData = 8'h00;
 	end
 
-	// ------------------------------------------------------------------
-	// Dispatch
-	// ------------------------------------------------------------------
-	// A command arrives with its checksum verified. An opcode with no
-	// implementation (the format commands $19/$1A among them) is answered
-	// with a header-only group of the requested length, as a real drive
-	// does. A reply is exactly as long as the Mac asked for.
+	// dispatch; unimplemented opcodes get a header-only reply of the requested length
 	localparam C_IDLE  = 3'd0, C_FETCH = 3'd1, C_FETCH_GO = 3'd2,
 	           C_WAIT  = 3'd3, C_SEND  = 3'd4, C_SENDING  = 3'd5;
 	reg [2:0] cstate;
@@ -236,8 +215,7 @@ module dcd
 	// tested on cmdOp so the continued forms count as known
 	wire        cmdKnown  = (cmdOp == 6'h00) || cmdIsWr || (cmdOp == 6'h03);
 
-	// a write must have brought a whole sector; cleared by the frame that
-	// reports it
+	// a write must have brought a whole sector
 	reg lastLba_valid;
 	reg [23:0] lastLba;
 	reg wrFull;
@@ -344,9 +322,7 @@ module dcd
 
 			C_WAIT:
 				if (!diskBusy) begin
-					// A refused fetch is answered with status $81: bit 0 is the bit the
-					// ROM tests, bit 7 the one the document names. blksLeft is left
-					// alone; the ROM checks it before the status.
+					// refused fetch: status $81 (bit 0 is what the ROM tests); blksLeft kept
 					if (diskErr) begin
 						replyStat <= 8'h81;
 						// a read's 77-group frame shortens to the header
@@ -362,9 +338,7 @@ module dcd
 			end
 
 			C_SENDING:
-				// wait for txBusy up, then down
-				//
-				// an abandoned frame must not arm the next block
+				// wait for txBusy up, then down; an abandoned frame must not arm the next block
 				if (txAbort) begin
 					sending <= 1'b0;
 					txArm   <= 1'b0;

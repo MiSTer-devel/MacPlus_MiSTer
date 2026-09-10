@@ -159,8 +159,7 @@ module dataController_top(
 	always @(posedge clk32)
 		if (clk8_en_n) loadSoundD <= loadSound;
 
-	// Spindle duty for a 400K drive, from the low bits of each sound-buffer
-	// word; see rtl/disk_pwm_duty.v.
+	// spindle duty for a 400K drive; see rtl/disk_pwm_duty.v
 	wire [8:0] disk_pwm;
 	disk_pwm_duty disk_pwm_duty_inst
 	(

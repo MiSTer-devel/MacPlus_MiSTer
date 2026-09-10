@@ -79,8 +79,7 @@ module iwm
 	output        dskWriteReqExt,
 	input         dskWriteAckExt,
 
-	// DCD (Apple HD20) on the external drive port. One hps_io block-device
-	// slot, passed straight through to rtl/dcd.v.
+	// DCD (Apple HD20) block-device slot, passed through to rtl/dcd.v
 	output [31:0] dcd_sd_lba,
 	output        dcd_sd_rd,
 	output        dcd_sd_wr,
@@ -130,17 +129,11 @@ module iwm
 	wire senseInt = readDataInt[7]; // bit 7 doubles as the sense line here
 	wire newByteReadyExt;
 	wire [7:0] readDataExt;
-	// a DCD image is mounted (rtl/dcd.v's present); declared here because
-	// floppyExt's enable uses it
+	// a DCD image is mounted (rtl/dcd.v)
 	wire dcdPresent;
 
-	// ------------------------------------------------------------------
-	// Daisy chain: the flow-through flip-flop of Apple's DCD specification
-	// ------------------------------------------------------------------
-	// An LSTRB pulse while /ENBL2 stays asserted advances the chain and
-	// releasing /ENBL2 rewinds it. One hop is modelled: the DCD, then the
-	// external floppy. While the DCD owns the port the pulse is a hand-over;
-	// once the floppy owns it the same pulse is its ordinary LSTRB.
+	// daisy chain (Apple's flow-through flip-flop): LSTRB with /ENBL2 asserted
+	// advances past the DCD to the external floppy; releasing /ENBL2 rewinds
 	reg  chainSel;          // 1 = the chain has advanced past the DCD
 	reg  lstrbPrevChain;
 	always @(posedge clk) if (cep) lstrbPrevChain <= lstrb;
@@ -166,9 +159,7 @@ module iwm
 	wire writeReqInt = cen && dataRegWrite && !selectExternalDriveNext;
 	wire writeReqExt = cen && dataRegWrite &&  selectExternalDriveNext;
 
-	// The DCD needs an edge: dataRegWrite is a level held for three cen
-	// samples, which floppy.v's write-busy interlock absorbs and dcd_link.v
-	// would take as three bytes.
+	// dataRegWrite is a level held for three cen samples; the DCD needs an edge
 	reg dataRegWriteSeen;
 	always @(posedge clk or negedge _reset) begin
 		if (_reset == 1'b0)
@@ -194,9 +185,8 @@ module iwm
 		.ca2(ca2),
 		.SEL(SEL),
 		.lstrb(lstrb),
-		// A real IWM enables one drive at a time, steered by SELECT; without
-		// this term the chain walk's LSTRB (EJECT in state 7) reaches a still-
-		// enabled internal drive.
+		// a real IWM enables one drive at a time; keeps the chain walk's LSTRB
+		// (EJECT in state 7) from the internal drive
 		._enable(~(diskEnableInt & driveSel & ~selectExternalDrive)),
 		// dataInLo directly, not a registered copy: writeReqInt pulses the
 		// same cycle a register load from dataInLo would be scheduled, and
@@ -249,8 +239,7 @@ module iwm
 		.ca2(ca2),
 		.SEL(SEL),
 		.lstrb(lstrb),
-		// disabled while the DCD owns the port, so the DCD's command bytes and
-		// the chain walk's LSTRB never reach this drive
+		// disabled while the DCD owns the port
 		._enable(~(diskEnableExt & ~dcdOwnsPort)),
 		.writeData(dataInLo), // see floppyInt's writeData comment above
 		.readData(readDataExt),
@@ -287,12 +276,8 @@ module iwm
 		.dskCommitBufData(dskCommitBufDataExt)
 	);
 
-	// ------------------------------------------------------------------
-	// DCD (Apple HD20)
-	// ------------------------------------------------------------------
-	// The DCD sits on the external port at the head of the chain; until the
-	// Mac advances the chain it owns the port, at the floppy's enable and at
-	// the read mux below. With nothing mounted the port is unchanged.
+	// DCD (Apple HD20) at the head of the chain; it owns the port until the
+	// Mac advances the chain
 	wire  [7:0] readDataDcd;
 	wire        newByteReadyDcd;
 
@@ -328,8 +313,7 @@ module iwm
 	wire [7:0] readDataExtSel      = dcdOwnsPort ? readDataDcd     : readDataExt;
 	wire       newByteReadyExtSel  = dcdOwnsPort ? newByteReadyDcd : newByteReadyExt;
 
-	// The sense line comes through the same mux as the data: the ROM's ID
-	// probe reads the status register, so the DCD's answer has to be there.
+	// sense comes through the same mux, so the ROM's ID probe sees the DCD
 	wire senseExt = readDataExtSel[7];
 
 	wire [7:0] readData = selectExternalDrive ? readDataExtSel : readDataInt;

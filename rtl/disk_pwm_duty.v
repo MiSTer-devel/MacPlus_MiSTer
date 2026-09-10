@@ -11,8 +11,6 @@
 //   3. index = sum/(count/10) - 11, clamped to 0..399,
 //   4. duty% = index / 4.19.
 //
-// The table is a permutation, so summing the raw values does not work.
-//
 module disk_pwm_duty
 (
 	input             clk,
@@ -21,8 +19,7 @@ module disk_pwm_duty
 	output reg  [8:0] duty_index   // 0..399; duty% = index/4.19
 );
 
-	// Conversion table, per the 400KB drive specification (values as used by
-	// MAME's sonydriv).
+	// conversion table, per the 400KB drive specification
 	function [5:0] pwm_convert(input [5:0] v);
 		case (v)
 		6'd0 : pwm_convert = 6'd0;
@@ -92,7 +89,7 @@ module disk_pwm_duty
 		endcase
 	endfunction
 
-	// three pipeline stages; the single-cycle form did not meet timing
+	// three pipeline stages, for timing
 	reg [12:0] acc = 13'd0;
 	reg  [6:0] cnt = 7'd0;
 

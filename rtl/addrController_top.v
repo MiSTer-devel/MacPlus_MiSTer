@@ -202,8 +202,7 @@ module addrController_top(
 	// simulate smaller RAM/ROM sizes
 	assign macAddr[16] = rom_access && configROMSize == 2'b00 ? 1'b0 :     // force A16 to 0 for 64K ROM access
 									addrMux[16]; 
-	// every boot ROM sits at offset 0 of its own slot, the 64K image too, so
-	// A17 is forced to 0 rather than 1
+	// the 64K ROM image sits at offset 0 of its slot, so A17 is forced to 0
 	assign macAddr[17] = ram_access && configRAMSize == 2'b00 ? 1'b0 :   // force A17 to 0 for 128K RAM access
 									rom_access && configROMSize == 2'b01 ? 1'b0 :  // force A17 to 0 for 128K ROM access
 									rom_access && configROMSize == 2'b00 ? 1'b0 :  // force A17 to 0 for 64K ROM access (image sits at its slot's offset 0)

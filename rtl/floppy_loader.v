@@ -19,8 +19,6 @@
 // the whole image is resident, so the Mac can never observe a disk that is
 // only partially loaded - the SD-mount equivalent of the end-of-download
 // latch the old ioctl_download path used.
-//
-// The medium sniff (media_ds) reads sector 2 as it streams past.
 module floppy_loader
 (
 	input         clk_sys,
@@ -48,8 +46,7 @@ module floppy_loader
 	output reg  [63:0]  loaded_size,   // img_size, latched at this slot's own mount
 	output reg           readonly_latched,
 
-	// what the medium says about its own sidedness, latched with `done`:
-	// 1 = double-sided, or no recognisable volume (see the sniff below)
+	// medium sidedness from the volume header, latched with `done`
 	output reg          media_ds,
 	output              busy
 );
@@ -84,17 +81,8 @@ always @(posedge clk_sys) begin
 	else if (state == IDLE && mount_pending) mount_pending <= 1'b0;
 end
 
-// ---------------------------------------------------------------------
-// The medium sniff
-//
-// Nothing on a diskette records whether it is single- or double-sided, but
-// the volume on it has a size, and that is what the .Sony driver's format
-// byte has to agree with. The size is read from the Master Directory Block
-// as sector 2 streams past: block 2 is cylinder 0 side 0 sector 2 under
-// either mapping, and drNmAlBlks/drAlBlkSiz sit at MDB offsets 18/20 in
-// MFS and HFS alike. An image with no recognisable MDB reports double-sided,
-// so a blank or non-standard image is addressed exactly as before and takes
-// whatever geometry the user formats onto it.
+// medium sniff: volume size from the Master Directory Block in sector 2
+// (drNmAlBlks * drAlBlkSiz, MFS and HFS alike); no MDB = double-sided
 localparam [15:0] MDB_SIG_MFS = 16'hD2D7;
 localparam [15:0] MDB_SIG_HFS = 16'h4244;
 // volume size in 512-byte blocks, midway between 800 and 1600
@@ -158,8 +146,7 @@ always @(posedge clk_sys) begin
 	end
 end
 
-// published with `done`; double-sided out of reset, the fall-through for a
-// medium that has said nothing
+// published with `done`; double-sided until the medium says otherwise
 always @(posedge clk_sys) begin
 	if (reset) media_ds <= 1'b1;
 	else if (state == DONE_PULSE)

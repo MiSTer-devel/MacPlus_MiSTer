@@ -118,8 +118,7 @@ module addrDecoder(
 				end
 			end
 			4'b0100: begin //40 0000 - 4F FFFF
-				// SCSI detection: with no SCSI the ROM mirrors at A17 = 1 (see the
-				// memory map above), which is what the Plus ROM tests
+				// no SCSI: ROM mirrors at A17 = 1, which is what the Plus ROM tests
 				if(configROMSize[1] || address[17] == 1'b0 || !scsiPresent)
 					selectROM = !_cpuAS;
 				selectSEOverlay = !_cpuAS;

@@ -1,14 +1,7 @@
-/* dcd_disk.v - the HPS sector path behind the DCD device.
+/* dcd_disk.v - sector buffer and hps_io block-device handshake for the DCD.
 
-   One 512-byte sector buffer and the block-device handshake for one hps_io
-   slot, plus the mount state the Status reply needs. rtl/dcd.v drives it one
-   block at a time.
-
-   The HPS packs disk byte 0 into sd_buff_dout[7:0], so even bytes live in
-   buffer0 and odd ones in buffer1, as in rtl/scsi.v; the command side is
-   byte addressed. sd_buff_wr is shared across every slot and is qualified
-   with this slot's sd_ack. The ack timeout keeps a stalled HPS from leaving
-   /HSHK asserted forever.
+   Even bytes in buffer0, odd in buffer1 (disk byte 0 is sd_buff_dout[7:0],
+   as in rtl/scsi.v). sd_buff_wr is qualified with this slot's sd_ack.
 */
 
 module dcd_disk #(
@@ -43,8 +36,7 @@ module dcd_disk #(
 	output            busy,
 	output reg        err,           // last request failed; cleared by the next
 
-	// ---- sector buffer, byte addressed. buf_q is registered: it follows
-	//      buf_addr by one clock, like any inferred block RAM. ----
+	// sector buffer, byte addressed; buf_q follows buf_addr by one clock
 	input       [8:0] buf_addr,
 	output      [7:0] buf_q,
 	input       [7:0] buf_d,
@@ -56,12 +48,7 @@ module dcd_disk #(
 
 	assign busy = (state != IDLE);
 
-	// ------------------------------------------------------------------
-	// Mount state
-	// ------------------------------------------------------------------
-	// img_size is a byte count; capacities past 2^24 blocks are clamped.
-	// Not reset by _reset: a mounted image is host state, and img_mounted
-	// is a one-shot.
+	// mount state; not reset by _reset (a mounted image survives a Mac reset)
 	initial begin
 		present    = 1'b0;
 		blockCount = 24'd0;
@@ -76,11 +63,7 @@ module dcd_disk #(
 		end
 	end
 
-	// ------------------------------------------------------------------
-	// Buffer
-	// ------------------------------------------------------------------
-	// Port A is the HPS side, a whole 16-bit word at a time. Port B is the
-	// command side, one byte at a time, with the lane chosen by buf_addr[0].
+	// port A: HPS, 16-bit words; port B: command side, bytes
 	wire [7:0] buf0_qa, buf1_qa, buf0_qb, buf1_qb;
 	wire       hps_we = sd_buff_wr & sd_ack;
 
@@ -109,9 +92,6 @@ module dcd_disk #(
 		.wren_b(buf_we & buf_addr[0]), .q_b(buf1_qb)
 	);
 
-	// ------------------------------------------------------------------
-	// Block-device handshake
-	// ------------------------------------------------------------------
 	// out-of-range blocks are refused here and reported in the status byte
 	wire outOfRange = !present || (lba >= blockCount);
 
@@ -152,8 +132,7 @@ module dcd_disk #(
 				end
 				else timeout <= timeout - 1'b1;
 
-			// hps_io holds sd_ack for the whole transfer; the request stays
-			// asserted until it drops
+			// sd_ack is held for the whole transfer
 			WAIT_DONE:
 				if (!sd_ack) begin
 					sd_rd <= 1'b0;

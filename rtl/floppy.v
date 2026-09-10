@@ -83,8 +83,7 @@ module floppy
 	input drive800k,
 	// the medium's own sidedness, from floppy_loader.v's mount-time sniff
 	input mediaSides,
-	// Spindle duty index, 0..399, from rtl/disk_pwm_duty.v. Only a 400K
-	// mechanism obeys it; see the tachometer.
+	// spindle duty index 0..399 from rtl/disk_pwm_duty.v
 	input [8:0] disk_pwm,
 	output diskEject,
 
@@ -130,7 +129,7 @@ module floppy
 		1'b0, // DRVIN = yes
 		1'b0, // INSTALLED = yes
 		1'b0, // READY = yes
-		// SIDES: the 128K and 512K shipped a single-sided 400K mechanism
+		// SIDES: the 128K and 512K have a single-sided drive
 		drive800k, // SIDES: 1 = double-sided drive, 0 = single-sided
 		1'b0, // UNUSED
 		1'b0, // SUPERDR
@@ -189,14 +188,8 @@ module floppy
 		.wr_end         ( wrEnd )
 	);
 
-	// ---------------------------------------------------------------------
-	// Is this a double-sided diskette? Decides both where a sector lives in
-	// the image and the format byte the encoder writes, which is where the
-	// .Sony driver reads the geometry back from. Three terms, each a ceiling
-	// on the next: the drive mechanism, the file size (a 409,600-byte file
-	// cannot hold two sides), and the medium: the volume it carried at mount
-	// (mediaSides) until a format overwrites that, then the format byte of
-	// the track being laid down.
+	// double-sided = drive mechanism AND file size AND the medium (volume
+	// header at mount, or the format byte of the last formatted track)
 	reg fmtSeen; // an address field's format byte has been read since the mount
 	reg fmtDs;
 	always @(posedge clk) begin
@@ -348,10 +341,8 @@ module floppy
 		end
 	end
 
-	// The write as a whole, for the encoder's format relay: from the first
-	// byte the IWM hands over until it has left write mode and the pacer is
-	// empty. wrEnd is delayed two clocks so the encoder sees a mark before
-	// the end; a disk change ends a burst too.
+	// the write as a whole, for the encoder's format relay; wrEnd is delayed
+	// two clocks so the encoder sees a mark before the end
 	reg  wrBusyPrev, wrEndD1;
 	wire wrBusy = (writeMode && _enable == 1'b0) || writeBusyReg;
 	always @(posedge clk or negedge _reset) begin
@@ -619,12 +610,8 @@ module floppy
 		endcase
 	end
 
-	// ---- spindle speed ------------------------------------------------
-	// A 400K mechanism takes its speed from the Mac's PWM (disk_pwm, from
-	// rtl/disk_pwm_duty.v) and the 64K ROM calibrates against the tach; an
-	// 800K mechanism self-regulates and keeps the track table above. The
-	// period is linear in the duty index, fitted so that index 101 gives
-	// ~402 rpm and 302 gives ~603 rpm; the ROM only needs it monotonic.
+	// 400K mechanism: period from the Mac's PWM duty (index 101 ~402 rpm,
+	// 302 ~603 rpm); an 800K mechanism keeps the track table above
 	wire [13:0] pwm_span   = {disk_pwm, 4'b0} + {5'b0, disk_pwm}; // index*17
 	wire [13:0] pwm_period = 14'd11686 - pwm_span;                // 11686..4903
 	wire [13:0] driveTachPeriod = drive800k ? driveTachBase : pwm_period;

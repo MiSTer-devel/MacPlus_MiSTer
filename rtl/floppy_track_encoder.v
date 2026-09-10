@@ -3,18 +3,10 @@
 
  encode a full floppy track from raw sector data on the fly
 
- The format relay (wr_* below)
-
- This encoder lays a track out from sector data and keeps no record of
- where on the media anything was written. A normal sector write needs
- none, but a format writes a whole track in one pass and then expects the
- next address field to come round to be sector 0 (fmt1Err otherwise), as
- it is on real media. So during a write the decoder reports the first
- address field it sees (wr_mark, with its sector), the distance from the
- head round to that mark is counted down per byte written (relay_ahead,
- modulo rev_len), and when the write ends (wr_end) the layout restarts at
- that sector with relay_ahead bytes of sync before its address mark. A
- write with no address field never arms the relay.
+ The format relay (wr_* below): a format expects the next address field
+ after the write to be sector 0, so the decoder reports the first address
+ field written (wr_mark) and the layout restarts there, relay_ahead bytes
+ of sync later, when the write ends (wr_end).
 
  */
 
@@ -160,8 +152,7 @@ end
    localparam STATE_GAP  = 4'd9;      // relay: gap_cnt sync bytes, then the address block
    localparam STATE_WAIT = 4'd15;     // wait until start of next sector
 
-   // ------------------------ format relay ------------------------
-   // bytes per revolution as laid out here: 782 per sector, spt sectors
+   // format relay: 782 bytes per sector as laid out here
    localparam [13:0] SECTOR_BYTES = 14'd782;
    wire [13:0] rev_len =
 	      (track[6:4] == 3'd0)?(14'd12 * SECTOR_BYTES):
@@ -336,8 +327,7 @@ always @(posedge clk or posedge rst) begin
 
 		case(state)
 
-			// relay: sync until the written track's first mark is due, then its
-			// address block (in place of that sector's SYN0)
+			// relay: sync until the written mark is due, then its address block
 			STATE_GAP: begin
 				if(gap_cnt <= 14'd1) begin
 					state <= STATE_ADDR;

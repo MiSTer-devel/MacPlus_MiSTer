@@ -28,12 +28,8 @@
  correct behaviour - there is no code path that can assert sector_valid
  without having verified the whole field.
 
- Address fields (D5 AA 96) in the write stream are reported, not decoded:
- only a format writes them, and floppy_track_encoder.v needs to know where
- the formatter put sector 0. `amark` pulses with the sector number as it
- goes by. `fmt_mark`/`fmt_ds` report the field's format byte (bit 5 = two
- sided) once its checksum has verified, since a wrong value would change
- the geometry of the whole disk.
+ Address fields (D5 AA 96) in the write stream are reported (amark, with the
+ sector) and their format byte after the checksum (fmt_mark/fmt_ds).
 
  The nibble-recovery arithmetic below is a direct RTL port of the reference
  decoder proved out against this project's
@@ -81,13 +77,11 @@ module floppy_track_decoder (
    // pulses for exactly one clk whenever a field is abandoned
    output reg        reject,
 
-   // pulses for one clk on an address field's sector number in the write
-   // stream (only a format writes those); amark_sector is valid with it
+   // address field sector number seen in the write stream (a format)
    output reg        amark,
    output reg [3:0]  amark_sector,
 
-   // pulses for one clk when an address field's checksum has verified;
-   // fmt_ds is that field's format byte bit 5
+   // address field checksum verified; fmt_ds = format byte bit 5
    output reg        fmt_mark,
    output reg        fmt_ds,
 
@@ -355,9 +349,7 @@ module floppy_track_decoder (
             end
 
             S_AMRK: begin
-               // D5 AA 96 t s h f c. The sector is reported as it goes by (the
-               // encoder's relay is calibrated to that byte); the format byte only
-               // once the checksum has confirmed the field.
+               // D5 AA 96 t s h f c: sector reported as it goes by, format byte after the checksum
                if (!nib_valid) am_ok <= 1'b0;
 
                case (am_idx)

@@ -75,12 +75,9 @@ localparam CONF_STR = {
 	// list instead.
 	// Extension list is MacLC.sv:81 verbatim - the host-side translation is
 	// keyed off the file, not the core, so the lists must agree.
-	// The D0 prefix here and on SC0/SC1/OI/OFG greys these items out on a
-	// model with no SCSI bus, from status_menumask bit 0 below.
+	// D0: greyed out on a model with no SCSI bus (status_menumask bit 0)
 	"D0SC4,ISOTO*CUEBINCHD,Mount CD-ROM;",
-	// Apple HD20 on the external floppy port: a hard disk image, so the SC
-	// form and extension list of the SCSI slots. The external floppy sits
-	// behind it on the daisy chain (rtl/iwm.v).
+	// Apple HD20 on the external floppy port, a hard disk image like SCSI
 	"SC5,IMGVHD,Mount HD20;",
 	"D0OI,CD-ROM Drive,Enabled,Disabled;",
 	// Index 0 MUST be Full: `status` defaults to zero and unity is the wanted
@@ -93,8 +90,7 @@ localparam CONF_STR = {
 	"O78,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"OBC,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
 	"-;",
-	// bits 1-3: five models need three bits and bit 10 is the serial input,
-	// hence the config version bump below
+	// three bits for five models; layout change, hence the config version bump
 	"O13,Model,Plus,SE,512K,128K,512Ke;",
 	"O5,Speed,8MHz,16MHz;",
 	"O6,Floppy Write,Off,On;",
@@ -371,8 +367,7 @@ mac_model mac_model
 	.ramSoldered   (               )
 );
 
-// Grey out what a model cannot honour. A second mac_model instance is fed
-// from the live status bits so greying follows the selection at once.
+// menu mask from the live status bits, so greying follows the selection
 wire menu_scsiPresent;
 wire menu_ramSoldered;
 
@@ -786,7 +781,7 @@ dataController_top #(.SCSI_DEVS(SCSI_DEVS), .SCSI_CD_DEV(SCSI_CD_DEV)) dc0
 	.img800k({dsk_ext_ds, dsk_int_ds}),
 	// the drive mechanism, from mac_model
 	.drive800k(drive800k),
-	// each floppy_loader's mount-time verdict on the medium it just loaded
+	// medium sidedness from each floppy_loader
 	.mediaSides({ldr_ext_media_ds, ldr_int_media_ds}),
 	.diskEject(diskEject),
 	.dskReadAddrInt(dskReadAddrInt),
@@ -853,10 +848,8 @@ dataController_top #(.SCSI_DEVS(SCSI_DEVS), .SCSI_CD_DEV(SCSI_CD_DEV)) dc0
 	.dcd_img_readonly(img_readonly)
 );
 
-// sd_rd/sd_wr are consumer outputs -> hps_io inputs, so the SCSI 2-bit view
-// above, each floppy_loader's own scalar sd_rd request, each
-// floppy_sd_writer's own scalar sd_wr request and the HD20's pair must be
-// combined into the full VDNUM vectors here.
+// sd_rd/sd_wr are consumer outputs -> hps_io inputs; the SCSI, floppy and
+// HD20 requests are combined into the full VDNUM vectors here.
 wire ldr_int_sd_rd, ldr_ext_sd_rd;
 wire wr_int_sd_wr,  wr_ext_sd_wr;
 assign sd_rd = {dcd_sd_rd, scsi_sd_rd[SCSI_CD_DEV], ldr_ext_sd_rd, ldr_int_sd_rd, scsi_sd_rd[1:0]};
@@ -1038,9 +1031,7 @@ wire  [7:0] dio_index;
 wire [20:0] dio_rom_addr  = {1'b0, dio_index[7:6], dio_addr[17:0]};
 wire [20:0] rom_read_addr = {1'b0, romSlot,        memoryAddr[18:1]};
 
-// good floppy image sizes are 819200 bytes and 409600 bytes; both mount on
-// every model. These flags say only how big the file is: floppy.v's
-// doubleSidedDisk decides the geometry.
+// good floppy image sizes are 819200 bytes and 409600 bytes
 reg dsk_int_ds, dsk_ext_ds;  // 819,200-byte image inserted
 reg dsk_int_ss, dsk_ext_ss;  // 409,600-byte image inserted
 
@@ -1089,9 +1080,7 @@ always @(posedge clk_sys) begin
 	end
 end
 
-// ROM slots are 512KB apart in the ROM region (rtl/sdram_map.vh); each image
-// starts at its slot's offset 0. Floppy images take the floppy_loader path
-// above.
+// ROM slots are 512KB apart in the ROM region (rtl/sdram_map.vh)
 reg [20:0] dio_a;
 reg [15:0] dio_data;
 reg        dio_write;
@@ -1116,8 +1105,7 @@ wire download_cycle = dio_download && dioBusControl;
 
 ////////////////////////// SDRAM /////////////////////////////////
 
-// Region bases from rtl/sdram_map.vh, added rather than concatenated; exact
-// because each base's low bits are zero below its payload.
+// region bases from rtl/sdram_map.vh
 wire dsk_cycle = dskReadAckInt || dskReadAckExt || dskLoadWrEn;
 
 wire [24:0] sdram_addr = download_cycle ? (`SDRAM_ROM_BASE  + dio_a[20:0])       :

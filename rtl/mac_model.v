@@ -1,8 +1,6 @@
 //
-// mac_model.v -- the OSD model selection as hardware straps.
-//
-// machineType is a Plus-vs-SE boolean, not a model index; every pre-Plus
-// model wants 0. Model numbers are positions in MacPlus.sv's CONF_STR list.
+// mac_model.v -- OSD model selection to hardware straps.
+// machineType is Plus-vs-SE, not a model index; pre-Plus models want 0.
 //
 module mac_model
 (
@@ -17,9 +15,7 @@ module mac_model
 	output reg       drive800k,     // 1 = drive can use 800K double-sided media
 	// 1 = RAM soldered down and mem_big ignored; greys the OSD Memory option
 	output reg       ramSoldered,
-	// 1 = this machine has a SCSI bus (rtl/addrDecoder.v). Clear makes the
-	// ROM window mirror at A17 = 1, which is how the Plus ROM detects the
-	// absence of SCSI; it is what tells a 512Ke from a Plus.
+	// 1 = SCSI bus present; clear makes the ROM mirror at A17 = 1 (no-SCSI test)
 	output reg       scsiPresent
 );
 

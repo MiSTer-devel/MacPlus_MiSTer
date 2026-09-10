@@ -1,10 +1,8 @@
 // dcd_icon.vh - the 32x32 icon a DCD device publishes in its identity block.
 //
-// The Status reply carries the icon at identity offset 64: 128 bytes of
-// image then 128 bytes of mask, four bytes per row, MSB leftmost.
+// 128 bytes of image then 128 bytes of mask, four bytes per row, MSB first.
 //
-// The drawing is this core's own; a real HD20's icon ROM has never been
-// dumped:
+// The drawing is this core's own:
 //
 //     ................................
 //     ................................
@@ -39,7 +37,7 @@
 //     ................................
 //     ................................
 //
-// The mask is the solid silhouette. A case by row: only a few rows differ.
+// mask: the solid silhouette
 
 function [31:0] dcd_icon_row;
 	input [4:0] row;

@@ -1,7 +1,6 @@
 //
-// sdram_map.vh -- the SDRAM region map, in words. Regions must not overlap
-// and must stay within sdram_addr[22:0]; bases are added to payloads, so a
-// base's low bits must be zero below its payload's width.
+// sdram_map.vh -- SDRAM region map in words; regions must not overlap and
+// bases are added to payloads (low bits zero below the payload width).
 //
 `ifndef SDRAM_MAP_VH
 `define SDRAM_MAP_VH
