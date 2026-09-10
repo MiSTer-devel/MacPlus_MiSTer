@@ -130,31 +130,17 @@ module iwm
 	wire senseInt = readDataInt[7]; // bit 7 doubles as the sense line here
 	wire newByteReadyExt;
 	wire [7:0] readDataExt;
-	// senseExt is muxed with the DCD's line below, next to the readData mux it
-	// belongs with - see readDataExtSel.
-	// A DCD image is mounted (rtl/dcd.v's `present`). Declared here because
-	// floppyExt's enable below uses it; the DCD is instantiated further down.
+	// a DCD image is mounted (rtl/dcd.v's present); declared here because
+	// floppyExt's enable uses it
 	wire dcdPresent;
 
 	// ------------------------------------------------------------------
-	// Daisy chain: the flow-through flip-flop
+	// Daisy chain: the flow-through flip-flop of Apple's DCD specification
 	// ------------------------------------------------------------------
-	// A real HD 20 has a floppy-out connector on its back panel, and the Mac
-	// walks the chain rather than owning one device per port. Apple's DCD
-	// specification (May 1985, Figure 2 "Flowthrough Schematic") describes the
-	// circuit and the Plus ROM implements it at $418934; a 512K gets the same
-	// routine from Apple's HD 20 INIT, as PTCH id=2 (`.Sony`).
-	//
-	// An advance is an LSTRB pulse while /ENBL2 stays asserted, and releasing
-	// /ENBL2 rewinds to the head. Only one hop is modelled - the DCD at
-	// position 0 with the external floppy behind it - which is the only
-	// ordering Apple allowed, since a floppy cannot pass the chain on.
-	//
-	// lstrb is also the Sony register-write strobe, so this cannot be a toggle
-	// count. Ownership is the discriminator instead, as in Apple's flip-flop:
-	// while the DCD owns the port a pulse means hand over, and once the floppy
-	// owns it the DCD is disabled and the same pulse is an ordinary LSTRB that
-	// floppy.v acts on itself.
+	// An LSTRB pulse while /ENBL2 stays asserted advances the chain and
+	// releasing /ENBL2 rewinds it. One hop is modelled: the DCD, then the
+	// external floppy. While the DCD owns the port the pulse is a hand-over;
+	// once the floppy owns it the same pulse is its ordinary LSTRB.
 	reg  chainSel;          // 1 = the chain has advanced past the DCD
 	reg  lstrbPrevChain;
 	always @(posedge clk) if (cep) lstrbPrevChain <= lstrb;
@@ -169,8 +155,7 @@ module iwm
 			chainSel <= 1'b1;
 	end
 
-	// The DCD still holds the external port. With no image mounted this is 0
-	// and every expression below collapses to what shipped before the chain.
+	// the DCD still holds the external port
 	wire dcdOwnsPort = dcdPresent & ~chainSel;
 
 	// write path: which drive's data register a CPU write targets follows
@@ -181,15 +166,9 @@ module iwm
 	wire writeReqInt = cen && dataRegWrite && !selectExternalDriveNext;
 	wire writeReqExt = cen && dataRegWrite &&  selectExternalDriveNext;
 
-	// The DCD needs an edge, not a level. dataRegWrite is a level on _cpuLDS,
-	// which fx68k holds for three CPU clock periods and so three cen samples.
-	// floppy.v never noticed because it refuses a writeReq while its 16 us
-	// write-busy is set; dcd_link.v has no such interlock and would take each
-	// pulse as a new byte, so $AA $81 $B1 arrives as $AA $AA $AA $81 $81 $81.
-	//
-	// An edge is safe because consecutive data-register writes are always
-	// separated by the handshake read at $1800 ($419AE8), which drops
-	// dataRegWrite in between. The floppy's writeReqExt above is left alone.
+	// The DCD needs an edge: dataRegWrite is a level held for three cen
+	// samples, which floppy.v's write-busy interlock absorbs and dcd_link.v
+	// would take as three bytes.
 	reg dataRegWriteSeen;
 	always @(posedge clk or negedge _reset) begin
 		if (_reset == 1'b0)
@@ -215,15 +194,9 @@ module iwm
 		.ca2(ca2),
 		.SEL(SEL),
 		.lstrb(lstrb),
-		// The ~selectExternalDrive term is essential. A real IWM has one disk-enable
-		// register bit ($1000/$1200) steered by SELECT ($1400/$1600) to /ENBL1
-		// or /ENBL2, so exactly one drive is ever enabled; here the two ports
-		// are independent latches, and the ROM's chain search asserts the
-		// external enable at $418984 without clearing the internal one. The
-		// walk's LSTRB in state 7 with SEL=0 is EJECT, so a still-enabled
-		// internal drive loses its disk. This term makes the drive deaf while
-		// the external port is driven, as /ENBL1 is, and with no external
-		// activity it reduces to what shipped.
+		// A real IWM enables one drive at a time, steered by SELECT; without
+		// this term the chain walk's LSTRB (EJECT in state 7) reaches a still-
+		// enabled internal drive.
 		._enable(~(diskEnableInt & driveSel & ~selectExternalDrive)),
 		// dataInLo directly, not a registered copy: writeReqInt pulses the
 		// same cycle a register load from dataInLo would be scheduled, and
@@ -276,13 +249,8 @@ module iwm
 		.ca2(ca2),
 		.SEL(SEL),
 		.lstrb(lstrb),
-		// Held disabled while the DCD is the selected link in the chain. The
-		// DCD takes over the readData/newByteReady/sense mux below, but
-		// writeReqExt and the LSTRB strobes would still reach this floppy -
-		// writing the DCD's command bytes onto its track 0, and ejecting it on
-		// the chain walk. floppy.v ignores all three while _enable is high.
-		// Once the chain advances this becomes the live drive; with no DCD
-		// mounted it reduces to ~diskEnableExt.
+		// disabled while the DCD owns the port, so the DCD's command bytes and
+		// the chain walk's LSTRB never reach this drive
 		._enable(~(diskEnableExt & ~dcdOwnsPort)),
 		.writeData(dataInLo), // see floppyInt's writeData comment above
 		.readData(readDataExt),
@@ -322,22 +290,9 @@ module iwm
 	// ------------------------------------------------------------------
 	// DCD (Apple HD20)
 	// ------------------------------------------------------------------
-	// A DCD device is a peer of floppy.v on this same byte interface: the
-	// corrected DB-19 pinout puts it on the ordinary RD/WR pins with /ENBL2 as
-	// its enable, so it hangs off the external drive port and only PH0-PH2 are
-	// repurposed, from a drive-register address into a handshake state bus.
-	//
-	// It sits at the head of the chain, with the external floppy behind it -
-	// see the flow-through flip-flop above. Until the Mac advances the chain
-	// the DCD owns the port outright, enforced at the floppy's enable as well
-	// as at the read mux below. With no DCD image mounted the external port is
-	// bit-identical to what it has always been.
-	//
-	// The DCD's own enable falls away on the hand-over, leaving it in the
-	// "phantom" state Apple's spec requires of a deselected link: dcd_link.v's
-	// `selected` goes low and its sense line reads 1 in every ID state.
-	// _iwmBusy on the external branch is still the floppy's writeBusyExt, which
-	// floppy.v holds at 0 while disabled - "ready", which is what a DCD wants.
+	// The DCD sits on the external port at the head of the chain; until the
+	// Mac advances the chain it owns the port, at the floppy's enable and at
+	// the read mux below. With nothing mounted the port is unchanged.
 	wire  [7:0] readDataDcd;
 	wire        newByteReadyDcd;
 
@@ -373,13 +328,8 @@ module iwm
 	wire [7:0] readDataExtSel      = dcdOwnsPort ? readDataDcd     : readDataExt;
 	wire       newByteReadyExtSel  = dcdOwnsPort ? newByteReadyDcd : newByteReadyExt;
 
-	// The sense line has to come through the same mux as the data. The status
-	// register (Q7=0, Q6=1) is where both programs that look for a DCD look:
-	// the ROM's ID probe at $418600 and HD Diag's `tst.b $1c00(a2)` at $D938.
-	// With the floppy answering, state 7 returns its INSTALLED register - 0 -
-	// and the probe fails at $418634's `bpl`. Taking bit 7 of readDataExtSel
-	// rather than a second copy of the mux keeps the two in step, and with
-	// nothing mounted it reduces to readDataExt[7] exactly.
+	// The sense line comes through the same mux as the data: the ROM's ID
+	// probe reads the status register, so the DCD's answer has to be there.
 	wire senseExt = readDataExtSel[7];
 
 	wire [7:0] readData = selectExternalDrive ? readDataExtSel : readDataInt;

@@ -77,17 +77,11 @@ module floppy
 	input advanceDriveHead,  // prevents overrun when debugging, does not exist on a real Mac!
 	output reg newByteReady,
 	input insertDisk,
-	// The mounted file is 819,200 bytes rather than 409,600. One of the
-	// three terms of doubleSidedDisk below, and only one - on its own it
-	// says nothing about the geometry of the volume inside the file.
+	// the mounted file is 819,200 bytes rather than 409,600
 	input img800k,
-	// The drive's capability, not the media's: 1 = 800K double-sided
-	// mechanism, 0 = 400K single-sided. Constant per model (rtl/mac_model.v),
-	// unlike img800k above, which describes whichever image is mounted.
+	// the drive mechanism: 1 = 800K double-sided, 0 = 400K single-sided
 	input drive800k,
-	// What the medium said at mount time, sniffed out of its own volume
-	// header by floppy_loader.v: 1 = the volume is double-sided, or the
-	// image carries nothing recognisable. See doubleSidedDisk below.
+	// the medium's own sidedness, from floppy_loader.v's mount-time sniff
 	input mediaSides,
 	// Spindle duty index, 0..399, from rtl/disk_pwm_duty.v. Only a 400K
 	// mechanism obeys it; see the tachometer.
@@ -106,9 +100,7 @@ module floppy
 	input writeProtect,    // 1 = writes refused for this drive (OSD toggle ANDed with img_readonly)
 	output writeBusy,      // 1 = write buffer full, mac must wait (iwm.v inverts for _iwmBusy)
 	output writeUnderrun,  // 1 = an in-flight write byte was abandoned (iwm.v inverts for _writeUnderrun)
-	input  writeMode,      // IWM Q7, 1 while the IWM is in write mode - what a real drive is
-	                       // told on its write-request line. Bounds a write for the format
-	                       // relay (floppy_track_encoder.v); the bytes still come via writeReq
+	input  writeMode,      // IWM Q7: in write mode. Bounds a write for the format relay
 
 	output [21:0] dskWriteAddr,
 	output [15:0] dskWriteData,
@@ -138,9 +130,7 @@ module floppy
 		1'b0, // DRVIN = yes
 		1'b0, // INSTALLED = yes
 		1'b0, // READY = yes
-		// SIDES: the 128K and 512K shipped a mechanically single-sided 400K
-		// drive. This is the mechanism, which is what the ROM interrogates;
-		// the medium's own sidedness is doubleSidedDisk below.
+		// SIDES: the 128K and 512K shipped a single-sided 400K mechanism
 		drive800k, // SIDES: 1 = double-sided drive, 0 = single-sided
 		1'b0, // UNUSED
 		1'b0, // SUPERDR
@@ -192,8 +182,7 @@ module floppy
 		.idata   ( dskReadDataLatch ),
 		.odata   ( dskReadDataEnc ),
 
-		// format relay: the write stream as the decoder consumed it, and
-		// the end of the burst (see wrEnd below for the ordering)
+		// format relay: the write stream as the decoder consumed it
 		.wr_byte        ( decReady ),
 		.wr_mark        ( secAmark ),
 		.wr_mark_sector ( secAmarkSector ),
@@ -201,39 +190,17 @@ module floppy
 	);
 
 	// ---------------------------------------------------------------------
-	// Is this a double-sided diskette?
-	//
-	// This one wire decides both halves of the geometry: where a sector lives
-	// in the image (the soff/spt arithmetic in the encoder and the decoder)
-	// and the format byte the encoder puts in every address field, which is
-	// where the .Sony driver reads the geometry back out of. The two have to
-	// be the same answer, or the driver builds a volume the core then
-	// addresses differently.
-	//
-	// Every 3.5in diskette of the era was one medium; 400K against 800K was a
-	// formatting choice, not a property of the disk. So three terms, each a
-	// ceiling on the ones after it:
-	//
-	//   drive800k  a 400K mechanism has one head, so this machine sees side 0
-	//              and lets the ROM judge what it finds.
-	//   img800k    a 409,600-byte file cannot hold a double-sided volume
-	//              however it is formatted; without it a format claiming two
-	//              sides would send side 1 past the end of the file. It also
-	//              keeps a Two-Sided erase of a 400K image producing an
-	//              ordinary 400K volume.
-	//   the medium which speaks through the volume it already carries
-	//              (mediaSides, sniffed at mount) and, once a format
-	//              overwrites that volume, through the format byte of the
-	//              track being laid down.
-	//
-	// The latch below is why the last two never disagree: a format happens
-	// after a mount, so within a session it wins, and at the next mount the
-	// sniff reads the volume that format wrote.
+	// Is this a double-sided diskette? Decides both where a sector lives in
+	// the image and the format byte the encoder writes, which is where the
+	// .Sony driver reads the geometry back from. Three terms, each a ceiling
+	// on the next: the drive mechanism, the file size (a 409,600-byte file
+	// cannot hold two sides), and the medium: the volume it carried at mount
+	// (mediaSides) until a format overwrites that, then the format byte of
+	// the track being laid down.
 	reg fmtSeen; // an address field's format byte has been read since the mount
 	reg fmtDs;
 	always @(posedge clk) begin
-		// Cleared with the decoder that feeds it, on the same eject/mount
-		// events: a latch must not outlive its medium.
+		// cleared on the same eject/mount events as the decoder
 		if (!_reset || writePathReset) begin
 			fmtSeen <= 1'b0;
 			fmtDs   <= 1'b0;
@@ -381,17 +348,10 @@ module floppy
 		end
 	end
 
-	// The write as a whole, for the encoder's format relay (see
-	// floppy_track_encoder.v's header): a burst runs from the first byte the
-	// IWM hands over until it has left write mode and the last byte has left
-	// the pacer. Between bytes writeBusyReg drops for a few clocks while the
-	// Mac refills the IWM, so the end is taken from Q7 and the pacer together.
-	//
-	// wrEnd is that end delayed by two clocks, so the encoder hears of an
-	// address mark before it hears the burst is over: the pacer hands its last
-	// byte to the decoder on the edge that clears writeBusyReg, and the mark
-	// is reported two clocks after that. A disk change ends a burst too, so
-	// the relay cannot stay armed for a departing disk.
+	// The write as a whole, for the encoder's format relay: from the first
+	// byte the IWM hands over until it has left write mode and the pacer is
+	// empty. wrEnd is delayed two clocks so the encoder sees a mark before
+	// the end; a disk change ends a burst too.
 	reg  wrBusyPrev, wrEndD1;
 	wire wrBusy = (writeMode && _enable == 1'b0) || writeBusyReg;
 	always @(posedge clk or negedge _reset) begin
@@ -630,10 +590,7 @@ module floppy
 	   64-79:   603   timing value $???? (acceptable range {19D0-1ADE})
 
 	   RPM per Guide to the Macintosh Family Hardware; sonydriv.c labels the
-	   same rows 500/550/600/675/750. The periods below give rpm =
-	   clk8 / (2*period), since TACH is 60 pulses (120 edges) per revolution:
-	   9996 -> 406 rpm, 9122 -> 445, 8292 -> 490, 7463 -> 544, 6634 -> 612,
-	   all within ~1.5% of that table.
+	   same rows 500/550/600/675/750.
 		
 		Experimentally determined toggle rates for Plus Too with 8.125 MHz CPU clock:
 		TACH Half Period Clocks		Resulting Timing Value
@@ -663,33 +620,11 @@ module floppy
 	end
 
 	// ---- spindle speed ------------------------------------------------
-	//
-	// On a 400K mechanism the Mac controls motor speed in software: it writes
-	// a dithered PWM value into the low bits of every sound-buffer word
-	// (converted to a duty index by rtl/disk_pwm_duty.v and arriving here as
-	// disk_pwm, 0..399) and closes the loop by reading TACH back. An 800K
-	// mechanism self-regulates and ignores the PWM entirely, so Plus, SE and
-	// 512Ke keep the track-indexed table above.
-	//
-	// This is the whole of Sad Mac 0F0004. The 64K ROM calibrates by measuring
-	// the tach, changing the PWM and measuring again, then dividing by the
-	// difference. Against a drive that ignores the PWM both measurements come
-	// out identical, the divisor is zero, and the ROM takes a divide-by-zero:
-	// class 0F, subclass 0004 -- the documented failure for a 64K-ROM Mac on
-	// an 800K drive. Reporting SIDES=0 does not help, because the ROM never
-	// asks: it discovers the drive type from whether the speed responds.
-	//
-	// The duty index sets the period outright, as it does on real hardware -
-	// a real drive has no idea which track the head is on, and the Mac gets
-	// each CLV zone's speed by commanding a different duty. Fitted to the two
-	// documented operating points: index 101 is ~402 rpm (period 9996, tracks
-	// 0-15) and index 302 is ~603 rpm (period 6634, tracks 64-79), giving
-	// period = 11686 - 17*index over 11686..4903. That brackets the whole CLV
-	// table with the ROM's operating range mid-scale, which is what a
-	// converging loop needs.
-	//
-	// Absolute accuracy is not required, since the ROM calibrates against
-	// whatever curve the drive presents, but the response must be monotonic.
+	// A 400K mechanism takes its speed from the Mac's PWM (disk_pwm, from
+	// rtl/disk_pwm_duty.v) and the 64K ROM calibrates against the tach; an
+	// 800K mechanism self-regulates and keeps the track table above. The
+	// period is linear in the duty index, fitted so that index 101 gives
+	// ~402 rpm and 302 gives ~603 rpm; the ROM only needs it monotonic.
 	wire [13:0] pwm_span   = {disk_pwm, 4'b0} + {5'b0, disk_pwm}; // index*17
 	wire [13:0] pwm_period = 14'd11686 - pwm_span;                // 11686..4903
 	wire [13:0] driveTachPeriod = drive800k ? driveTachBase : pwm_period;

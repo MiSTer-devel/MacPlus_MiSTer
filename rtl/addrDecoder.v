@@ -118,12 +118,8 @@ module addrDecoder(
 				end
 			end
 			4'b0100: begin //40 0000 - 4F FFFF
-				// SCSI detection, per the memory map at the top of this file:
-				// "If ROM is mirrored when A17 is 1, then SCSI is assumed to be
-				// unavailable". The Plus ROM reads $420000 and $440000 and
-				// compares them ($4003E4), storing the verdict in $0B22 bit 7.
-				// A 512Ke runs the Plus's own 128K ROM, so this decode is the
-				// only thing that can tell the two machines apart.
+				// SCSI detection: with no SCSI the ROM mirrors at A17 = 1 (see the
+				// memory map above), which is what the Plus ROM tests
 				if(configROMSize[1] || address[17] == 1'b0 || !scsiPresent)
 					selectROM = !_cpuAS;
 				selectSEOverlay = !_cpuAS;

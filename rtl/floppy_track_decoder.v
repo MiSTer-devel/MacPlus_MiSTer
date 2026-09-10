@@ -28,24 +28,12 @@
  correct behaviour - there is no code path that can assert sector_valid
  without having verified the whole field.
 
- Address fields (D5 AA 96) are reported, not decoded. A normal sector write
- never contains one - the Mac writes a data field straight behind the
- address field it just read - so one in the write stream means the track is
- being formatted, and floppy_track_encoder.v then needs to know where the
- formatter put its sectors (its header explains why). `amark` pulses once
- per address field with the sector number; the track/side bytes are not
- checked because the drive's own head position decides where the data
- lands, and a formatter writing some other track's number into the field
- would be laying down a broken disk on real media too.
-
- The same field also carries the format byte, and `fmt_mark`/`fmt_ds`
- report it. It is the one place the medium's own sidedness is ever stated:
- bit 5 set means the track being laid down is two-sided, clear means
- one-sided, and the low five bits are the interleave code, which this
- decoder ignores. Unlike the sector number this is checksum-gated: a
- mis-synced match that slipped through would not cost one sector, it would
- change the geometry of the whole disk, and the checksum byte is the next
- one along anyway.
+ Address fields (D5 AA 96) in the write stream are reported, not decoded:
+ only a format writes them, and floppy_track_encoder.v needs to know where
+ the formatter put sector 0. `amark` pulses with the sector number as it
+ goes by. `fmt_mark`/`fmt_ds` report the field's format byte (bit 5 = two
+ sided) once its checksum has verified, since a wrong value would change
+ the geometry of the whole disk.
 
  The nibble-recovery arithmetic below is a direct RTL port of the reference
  decoder proved out against this project's
@@ -93,15 +81,13 @@ module floppy_track_decoder (
    // pulses for exactly one clk whenever a field is abandoned
    output reg        reject,
 
-   // pulses for exactly one clk when an address field's sector number has
-   // gone by in the write stream - only a format writes those; see the
-   // header. amark_sector is valid with it.
+   // pulses for one clk on an address field's sector number in the write
+   // stream (only a format writes those); amark_sector is valid with it
    output reg        amark,
    output reg [3:0]  amark_sector,
 
-   // pulses for exactly one clk when a whole address field has gone by
-   // AND its checksum verified; fmt_ds is that field's format byte bit 5,
-   // valid with it. See the header.
+   // pulses for one clk when an address field's checksum has verified;
+   // fmt_ds is that field's format byte bit 5
    output reg        fmt_mark,
    output reg        fmt_ds,
 
@@ -225,10 +211,7 @@ module floppy_track_decoder (
                                // payload bytes 3g..3g+2, no lookback
    localparam S_DSUM = 3'd4;  // 4 bytes: checksum
    localparam S_DTRL = 3'd5;  // 2 bytes: DE AA trailer
-   localparam S_AMRK = 3'd6;  // the 5 bytes after D5 AA 96: t s h f c -
-                               // the sector reported on amark as it goes
-                               // by, the format byte on fmt_mark once c
-                               // has confirmed the whole field
+   localparam S_AMRK = 3'd6;  // the 5 bytes after D5 AA 96: t s h f c
 
    reg [2:0]  state;
    reg [23:0] hist;
@@ -372,25 +355,9 @@ module floppy_track_decoder (
             end
 
             S_AMRK: begin
-               // D5 AA 96 t s h f c, walked to the end.
-               //
-               // `s` is still reported the instant it goes by, exactly as
-               // before: floppy_track_encoder.v's relay measures the head's
-               // position from that byte and its "five bytes behind the
-               // D5" arithmetic is calibrated to it. A sector this track
-               // cannot hold (or a byte that is not GCR at all) is not
-               // reported: nothing could be laid out for it, and a
-               // formatter writing such a field is not one whose track
-               // needs relaying. D5 and AA are not data nibbles, so the
-               // scan cannot have matched inside a field.
-               //
-               // The walk then continues through h, f and c for the format
-               // byte (see the header). Those three bytes are the field's
-               // own - the trailer is DE AA, and D5 AA AD cannot start
-               // before it - so nothing that could begin a data field is
-               // skipped by staying here for them. A field that stops
-               // arriving part-way leaves this waiting, the same as a
-               // truncated data field does, and reports nothing.
+               // D5 AA 96 t s h f c. The sector is reported as it goes by (the
+               // encoder's relay is calibrated to that byte); the format byte only
+               // once the checksum has confirmed the field.
                if (!nib_valid) am_ok <= 1'b0;
 
                case (am_idx)
@@ -405,8 +372,7 @@ module floppy_track_decoder (
                3'd2: am_h <= nib_cur;
                3'd3: am_f <= nib_cur;
                default: begin
-                  // c: the field's own checksum over t s h f. Only a field
-                  // that survives it may speak for the medium's geometry.
+                  // c: the field's checksum over t s h f
                   if (am_ok && nib_valid &&
                       (am_t ^ am_s ^ am_h ^ am_f) == nib_cur) begin
                      fmt_mark <= 1'b1;

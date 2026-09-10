@@ -131,9 +131,7 @@ module dataController_top(
 	output           [15:0] sd_buff_din[SCSI_DEVS],
 	input                   sd_buff_wr,
 
-	// DCD (Apple HD20) on the external drive port.
-	// Its own hps_io slot, kept out of the SCSI arrays above because it is not
-	// a SCSI device and does not share their indexing.
+	// DCD (Apple HD20) on the external drive port: its own hps_io slot
 	output           [31:0] dcd_sd_lba,
 	output                  dcd_sd_rd,
 	output                  dcd_sd_wr,

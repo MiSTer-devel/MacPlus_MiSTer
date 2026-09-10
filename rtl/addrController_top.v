@@ -202,11 +202,8 @@ module addrController_top(
 	// simulate smaller RAM/ROM sizes
 	assign macAddr[16] = rom_access && configROMSize == 2'b00 ? 1'b0 :     // force A16 to 0 for 64K ROM access
 									addrMux[16]; 
-	// Every boot ROM is written at offset 0 of its own 512KB slot, the 64K
-	// image included, so A17 is forced to 0 here rather than to 1. With A16
-	// also forced to 0 above, the image occupies bytes $00000-$0FFFF and
-	// aliases every 64KB across the Mac's ROM window, which is what a real
-	// 64K ROM does.
+	// every boot ROM sits at offset 0 of its own slot, the 64K image too, so
+	// A17 is forced to 0 rather than 1
 	assign macAddr[17] = ram_access && configRAMSize == 2'b00 ? 1'b0 :   // force A17 to 0 for 128K RAM access
 									rom_access && configROMSize == 2'b01 ? 1'b0 :  // force A17 to 0 for 128K ROM access
 									rom_access && configROMSize == 2'b00 ? 1'b0 :  // force A17 to 0 for 64K ROM access (image sits at its slot's offset 0)
@@ -262,9 +259,7 @@ module addrController_top(
 	assign dskLoadAckExt = dskLoadAck &  dskLoadSelExt;
 	assign dskLoadWrEn   = dskLoadGrant;
 
-	// Byte offsets of each floppy image within the disk region. Named in
-	// rtl/sdram_map.vh so that they and the boot-ROM slots can be checked
-	// against each other in one place.
+	// byte offsets of each floppy image within the disk region (rtl/sdram_map.vh)
 	assign memoryAddr =
 		dskReadAckInt ? dskReadAddrInt + `DSK_INT_BYTE_OFF:   // first dsk image at 1MB
 		dskReadAckExt ? dskReadAddrExt + `DSK_EXT_BYTE_OFF:   // second dsk image at 2MB

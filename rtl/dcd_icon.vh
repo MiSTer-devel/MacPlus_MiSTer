@@ -1,14 +1,10 @@
 // dcd_icon.vh - the 32x32 icon a DCD device publishes in its identity block.
 //
-// The Status reply carries `Icon` at identity offset 64: 128 bytes of image
-// then 128 bytes of mask, four bytes per row, most significant bit leftmost.
-// The Plus ROM hands that field straight to the Finder ($419CC4) without
-// testing the Icon_Included bit, so a device returning zeroes gets a blank
-// desktop icon rather than a default one.
+// The Status reply carries the icon at identity offset 64: 128 bytes of
+// image then 128 bytes of mask, four bytes per row, MSB leftmost.
 //
-// The drawing below is this core's own. A real HD20 serves its icon from the
-// Z8 controller's internal ROM (341-0339-A), which has never been dumped, so
-// there is no authentic bitmap to copy:
+// The drawing is this core's own; a real HD20's icon ROM has never been
+// dumped:
 //
 //     ................................
 //     ................................
@@ -43,10 +39,7 @@
 //     ................................
 //     ................................
 //
-// The mask is the solid silhouette of that box, which is what lets the Finder
-// drag and highlight the icon as one shape. A case by row rather than by
-// byte: only five of the 32 image rows and two of the 32 mask rows are
-// distinct, so the minimiser collapses nearly all of it.
+// The mask is the solid silhouette. A case by row: only a few rows differ.
 
 function [31:0] dcd_icon_row;
 	input [4:0] row;

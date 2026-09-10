@@ -1,26 +1,14 @@
 /* dcd_disk.v - the HPS sector path behind the DCD device.
 
    One 512-byte sector buffer and the block-device handshake for one hps_io
-   slot, plus the mount state the Status reply needs (present, capacity,
-   read-only). rtl/dcd.v drives it one block at a time, because that is how
-   the protocol works.
+   slot, plus the mount state the Status reply needs. rtl/dcd.v drives it one
+   block at a time.
 
-   Byte lanes follow the HPS, which packs disk byte 0 into sd_buff_dout[7:0]:
-   even bytes go in buffer0 and odd ones in buffer1, the same mapping
-   rtl/scsi.v uses. Swapped, every byte pair in every sector is transposed,
-   which only shows once something reads a filesystem. This module is
-   byte-addressed on the command side so the caller never has to think
-   about it.
-
-   The buffer is two planes of rtl/scsi.v's scsi_dpram, one per lane.
-
-   sd_buff_wr is shared across every slot and must be qualified against this
-   module's own sd_ack, or another slot's transfer writes into its sector.
-   rtl/floppy_loader.v makes the same guard for the same reason.
-
-   The ack timeout exists because a stalled or absent HPS response would
-   otherwise leave the drive holding /HSHK forever, which the Mac sees as a
-   hung bus rather than a failed command.
+   The HPS packs disk byte 0 into sd_buff_dout[7:0], so even bytes live in
+   buffer0 and odd ones in buffer1, as in rtl/scsi.v; the command side is
+   byte addressed. sd_buff_wr is shared across every slot and is qualified
+   with this slot's sd_ack. The ack timeout keeps a stalled HPS from leaving
+   /HSHK asserted forever.
 */
 
 module dcd_disk #(
@@ -71,16 +59,9 @@ module dcd_disk #(
 	// ------------------------------------------------------------------
 	// Mount state
 	// ------------------------------------------------------------------
-	// img_size is a byte count; a DCD block number is 24 bits, so anything
-	// past 2^24 blocks is clamped rather than allowed to wrap to a tiny
-	// capacity. HFS is the practical ceiling long before this.
-	//
-	// Not reset by _reset, deliberately. A mounted image is host state: a real
-	// HD20 is a separate box with its own power supply, so a Mac reset neither
-	// ejects its medium nor spins it down, and rtl/scsi.v settles the same
-	// question for the CD-ROM the same way. img_mounted is also a one-shot, so
-	// clearing `present` on reset would leave present=0 at the ROM's DCD probe
-	// ($418630) on every boot.
+	// img_size is a byte count; capacities past 2^24 blocks are clamped.
+	// Not reset by _reset: a mounted image is host state, and img_mounted
+	// is a one-shot.
 	initial begin
 		present    = 1'b0;
 		blockCount = 24'd0;
@@ -105,8 +86,7 @@ module dcd_disk #(
 
 	assign sd_buff_din = {buf1_qa, buf0_qa};
 
-	// The lane select has to be delayed to line up with the registered read,
-	// or buf_q serves the right byte of the wrong word on every other access.
+	// lane select delayed to match the registered read
 	reg buf_lane_q;
 	always @(posedge clk) buf_lane_q <= buf_addr[0];
 	assign buf_q = buf_lane_q ? buf1_qb : buf0_qb;
@@ -132,9 +112,7 @@ module dcd_disk #(
 	// ------------------------------------------------------------------
 	// Block-device handshake
 	// ------------------------------------------------------------------
-	// A block number at or past the capacity is refused here rather than sent
-	// to the HPS. TashTwenty does the same in TranslateAddr, and the protocol
-	// has somewhere to report it: the reply's status byte.
+	// out-of-range blocks are refused here and reported in the status byte
 	wire outOfRange = !present || (lba >= blockCount);
 
 	reg [ACK_TIMEOUT_BITS-1:0] timeout;
@@ -152,9 +130,7 @@ module dcd_disk #(
 			IDLE:
 				if (rd_req || wr_req) begin
 					err <= 1'b0;
-					// A write to a read-only mount fails here for the same
-					// reason an out-of-range block does: silently discarding
-					// it would report success for data that was never stored.
+				// a write to a read-only mount is refused like an out-of-range block
 					if (outOfRange || (wr_req && readonly))
 						err <= 1'b1;
 					else begin
@@ -176,10 +152,8 @@ module dcd_disk #(
 				end
 				else timeout <= timeout - 1'b1;
 
-			// hps_io holds sd_ack for the whole transfer and drops it when the
-			// sector has moved; the request lines must stay asserted until it
-			// does. This is rtl/floppy_loader.v's SD_WAIT_ACK/SD_WAIT_DONE
-			// split, and the split matters: sd_ack is not a pulse.
+			// hps_io holds sd_ack for the whole transfer; the request stays
+			// asserted until it drops
 			WAIT_DONE:
 				if (!sd_ack) begin
 					sd_rd <= 1'b0;

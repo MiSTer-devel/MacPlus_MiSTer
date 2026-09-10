@@ -11,11 +11,7 @@
 //   3. index = sum/(count/10) - 11, clamped to 0..399,
 //   4. duty% = index / 4.19.
 //
-// Step 1 matters. The table is a permutation (0, 1, 59, 2, 60, 40,
-// 54, 3, ...), so the raw 6-bit value bears no useful monotonic relation to
-// the real duty: sum the raw values instead and the result wanders more or
-// less independently of what the Mac asked for, and the ROM's speed loop
-// never settles.
+// The table is a permutation, so summing the raw values does not work.
 //
 module disk_pwm_duty
 (
@@ -96,11 +92,7 @@ module disk_pwm_duty
 		endcase
 	endfunction
 
-	// Pipelined in three stages. Doing the accumulate, the
-	// sum*205 scaling and the clamp in one combinational chain missed the
-	// clk_sys setup budget by 3.9 ns. Samples arrive roughly every 2 us and
-	// the window is 100 of them, so two extra cycles here cost nothing
-	// measurable and buy a comfortable path.
+	// three pipeline stages; the single-cycle form did not meet timing
 	reg [12:0] acc = 13'd0;
 	reg  [6:0] cnt = 7'd0;
 
@@ -139,8 +131,7 @@ module disk_pwm_duty
 	                         (idx >= 15'sd399) ? 9'd399 :
 	                                             idx[8:0];
 
-	// Mid-scale until the Mac has written the buffer at all, so the drive
-	// idles at a plausible speed rather than at a rail.
+	// mid-scale until the Mac has written the buffer
 	initial duty_index = 9'd200;
 
 	always @(posedge clk) if (scl_rdy) duty_index <= idx_clamped;

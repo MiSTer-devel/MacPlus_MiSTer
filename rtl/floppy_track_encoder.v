@@ -5,39 +5,16 @@
 
  The format relay (wr_* below)
 
- This encoder lays a track out from sector data, so it keeps no record of
- where on the media anything was written. A normal sector write needs none:
- the Mac writes a data field straight behind the address field it has just
- read, i.e. into the very place this encoder is about to generate it. A
- format is different. The Plus ROM writes a whole track in one pass -
- 1200 bytes of sync, then every sector's address and data field, sector 0
- first ($419282) - and then, with the head just past the end of what it
- wrote, reads the next address field to come round and requires it to be
- sector 0 ($419214; otherwise fmt1Err, -82, "can't find sector 0 after
- track format"). It also uses how far it had to read to get there to tune
- the next track's gaps ($41922C). On real media that is plain physics: the
- write went round once, so its start - sector 0 - is about to come under
- the head again. A free-running layout instead offers whichever sector it
- happened to be on, and every Erase Disk fails at track 0.
-
- The relay reproduces the physics in byte positions. The media is a ring
- of rev_len byte cells - spt sectors of SECTOR_BYTES, this encoder's own
- cycle. During a write floppy_track_decoder.v reports the first address
- field it sees (wr_mark, with its sector); from that byte on, the distance
- from the head round to that mark is counted down per byte written
- (relay_ahead, modulo rev_len). When the write ends (wr_end) the layout
- restarts at that sector with exactly relay_ahead bytes of sync before its
- address mark - so the head is where the written track says it is. A
- write with no address field in it (every ordinary sector write) never
- arms the relay and leaves the layout alone.
-
- Not modelled: a write that runs on more than one revolution past its own
- first mark has, on real media, overwritten that mark, and the first
- surviving one is a later sector. Here the count simply wraps and the
- first sector is still presented. The ROM's format never does this (one
- revolution plus ~1100 bytes of sync, tuned toward a gap of ~100), and
- the only consequence would be accepting a track the ROM would have
- rewritten - the sectors were all committed either way.
+ This encoder lays a track out from sector data and keeps no record of
+ where on the media anything was written. A normal sector write needs
+ none, but a format writes a whole track in one pass and then expects the
+ next address field to come round to be sector 0 (fmt1Err otherwise), as
+ it is on real media. So during a write the decoder reports the first
+ address field it sees (wr_mark, with its sector), the distance from the
+ head round to that mark is counted down per byte written (relay_ahead,
+ modulo rev_len), and when the write ends (wr_end) the layout restarts at
+ that sector with relay_ahead bytes of sync before its address mark. A
+ write with no address field never arms the relay.
 
  */
 
@@ -60,9 +37,7 @@ module floppy_track_encoder (
 
    output [7:0] 	odata,
 
-   // format relay - the write stream as the media saw it (see the header).
-   // For any one byte these arrive in this order on distinct clocks; the
-   // pipeline in floppy.v guarantees it.
+   // format relay: the write stream as the media saw it (see the header)
    input             wr_byte,        // pulse: a byte has been laid on the media
    input             wr_mark,        // pulse: that byte was an address field's sector number
    input      [3:0]  wr_mark_sector, //   ... and this is the sector, valid with wr_mark
@@ -186,9 +161,7 @@ end
    localparam STATE_WAIT = 4'd15;     // wait until start of next sector
 
    // ------------------------ format relay ------------------------
-   // Bytes per revolution as laid out here: SYN0 56 + ADDR 10 + SYN1 5 +
-   // DHDR 4 + DZRO 12 + DPRE 4 + DATA 683 + DSUM 4 + DTRL 3 + the one byte
-   // STATE_WAIT itself emits = 782 per sector, spt sectors per revolution.
+   // bytes per revolution as laid out here: 782 per sector, spt sectors
    localparam [13:0] SECTOR_BYTES = 14'd782;
    wire [13:0] rev_len =
 	      (track[6:4] == 3'd0)?(14'd12 * SECTOR_BYTES):
@@ -213,8 +186,7 @@ end
          if (wr_byte && relay_armed)
             relay_ahead <= (relay_ahead == 14'd0) ? rev_len - 14'd1 : relay_ahead - 14'd1;
          if (wr_mark && !relay_armed) begin
-            // the sector byte is the fifth of D5 AA 96 t s, so the D5 is
-            // five bytes behind the head: one revolution less five ahead
+            // the sector byte is five bytes behind the D5
             relay_armed  <= 1'b1;
             relay_sector <= wr_mark_sector;
             relay_ahead  <= rev_len - 14'd5;
@@ -350,8 +322,7 @@ always @(posedge clk or posedge rst) begin
 	   src_offset <= 9'd0;
 		gap_cnt <= 14'd0;
 	end else if(relay) begin
-		// the head is relay_ahead bytes short of the first address mark
-		// the write laid down - pick the layout up from there
+		// pick the layout up relay_ahead bytes short of the written mark
 		state <= STATE_GAP;
 		gap_cnt <= relay_ahead;
 		count <= 10'd0;
@@ -365,9 +336,8 @@ always @(posedge clk or posedge rst) begin
 
 		case(state)
 
-			// relay: sync until the written track's first mark is due, then
-			// straight into its address block (this replaces that sector's
-			// SYN0). gap_cnt of 0 still costs one byte, like any state.
+			// relay: sync until the written track's first mark is due, then its
+			// address block (in place of that sector's SYN0)
 			STATE_GAP: begin
 				if(gap_cnt <= 14'd1) begin
 					state <= STATE_ADDR;

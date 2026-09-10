@@ -19,9 +19,7 @@
 //  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 //============================================================================
 
-// The SDRAM region map (RAM / boot ROMs / floppy image staging). Consumed
-// below by sdram_addr, and by rtl/addrController_top.v for the per-image
-// byte offsets.
+// SDRAM region map: RAM, boot ROMs, floppy image staging
 `include "rtl/sdram_map.vh"
 
 module emu
@@ -80,11 +78,9 @@ localparam CONF_STR = {
 	// The D0 prefix here and on SC0/SC1/OI/OFG greys these items out on a
 	// model with no SCSI bus, from status_menumask bit 0 below.
 	"D0SC4,ISOTO*CUEBINCHD,Mount CD-ROM;",
-	// Apple HD20 on the external floppy port. A hard disk image like the SCSI
-	// slots above, so it takes their SC form and their extension list rather
-	// than the floppies' S/DSK. The external floppy sits behind it on the
-	// daisy chain - see rtl/iwm.v. The drive is available on every model;
-	// only the Mac-side driver differs, which readme.md sets out.
+	// Apple HD20 on the external floppy port: a hard disk image, so the SC
+	// form and extension list of the SCSI slots. The external floppy sits
+	// behind it on the daisy chain (rtl/iwm.v).
 	"SC5,IMGVHD,Mount HD20;",
 	"D0OI,CD-ROM Drive,Enabled,Disabled;",
 	// Index 0 MUST be Full: `status` defaults to zero and unity is the wanted
@@ -97,9 +93,8 @@ localparam CONF_STR = {
 	"O78,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"OBC,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
 	"-;",
-	// Bits 1-3, not a single bit: the model list has to reach five entries and
-	// bit 10 next door is the serial input. Moving the field is an
-	// incompatible layout change, hence the config version bump below.
+	// bits 1-3: five models need three bits and bit 10 is the serial input,
+	// hence the config version bump below
 	"O13,Model,Plus,SE,512K,128K,512Ke;",
 	"O5,Speed,8MHz,16MHz;",
 	"O6,Floppy Write,Off,On;",
@@ -117,9 +112,7 @@ localparam CONF_STR = {
 
 wire status_turbo = status[5];
 
-// Which OSD items are unavailable on the selected model. Declared here
-// because hps_io below consumes it; it is driven further down, beside the
-// mac_model instance it is derived from.
+// OSD items unavailable on the selected model; driven beside mac_model below
 wire [15:0] status_menumask;
 
 ////////////////////   CLOCKS   ///////////////////
@@ -213,8 +206,7 @@ assign sd_buff_din[0] = scsi_sd_buff_din[0];
 assign sd_buff_din[1] = scsi_sd_buff_din[1];
 assign sd_buff_din[4] = scsi_sd_buff_din[SCSI_CD_DEV];
 
-// Slot 5, the HD20. rtl/dcd.v owns it outright - unlike the floppies it shares
-// its lba/din with nothing, reads and writes coming from one state machine.
+// slot 5, the HD20; rtl/dcd.v owns it outright
 wire [31:0] dcd_sd_lba;
 wire        dcd_sd_rd, dcd_sd_wr;
 wire [15:0] dcd_sd_buff_din;
@@ -379,13 +371,8 @@ mac_model mac_model
 	.ramSoldered   (               )
 );
 
-// Grey out the items a model cannot honour: the two SCSI slots, the CD-ROM
-// slot, CD volume and the Memory option are all inert on a 128K or 512K.
-//
-// A second mac_model instance derives the mask from the model table rather
-// than from a second list of models here. It is fed from the live status bits,
-// not the latched status_model, so greying follows what the user just picked
-// rather than waiting for Reset & Apply.
+// Grey out what a model cannot honour. A second mac_model instance is fed
+// from the live status bits so greying follows the selection at once.
 wire menu_scsiPresent;
 wire menu_ramSoldered;
 
@@ -797,8 +784,7 @@ dataController_top #(.SCSI_DEVS(SCSI_DEVS), .SCSI_CD_DEV(SCSI_CD_DEV)) dc0
 	// floppy disk interface
 	.insertDisk({dsk_ext_ins, dsk_int_ins}),
 	.img800k({dsk_ext_ds, dsk_int_ds}),
-	// mac_model's drive800k, straight through: the ROM asks the drive, and
-	// floppy.v's doubleSidedDisk takes it as its first ceiling.
+	// the drive mechanism, from mac_model
 	.drive800k(drive800k),
 	// each floppy_loader's mount-time verdict on the medium it just loaded
 	.mediaSides({ldr_ext_media_ds, ldr_int_media_ds}),
@@ -1048,20 +1034,13 @@ wire dio_download;
 wire [23:0] dio_addr = ioctl_addr[24:1];
 wire  [7:0] dio_index;
 
-// Word address within the ROM region: the slot number, then the word offset
-// inside that 512KB image. dio_index[7:6] is the slot Main_MiSTer is sending,
-// romSlot is the slot the running model reads from.
+// word address within the ROM region: slot number, then word offset
 wire [20:0] dio_rom_addr  = {1'b0, dio_index[7:6], dio_addr[17:0]};
 wire [20:0] rom_read_addr = {1'b0, romSlot,        memoryAddr[18:1]};
 
-// good floppy image sizes are 819200 bytes and 409600 bytes, and both mount
-// on every model: a 400K mechanism does not refuse an 800K diskette, it
-// reads side 0 and lets the ROM say "unreadable, initialise?".
-//
-// These two flags say only how big the file is. Whether the volume inside it
-// is double-sided is decided by floppy.v's doubleSidedDisk, which takes the
-// file size as one of three terms - the drive mechanism and the medium's own
-// header are the other two.
+// good floppy image sizes are 819200 bytes and 409600 bytes; both mount on
+// every model. These flags say only how big the file is: floppy.v's
+// doubleSidedDisk decides the geometry.
 reg dsk_int_ds, dsk_ext_ds;  // 819,200-byte image inserted
 reg dsk_int_ss, dsk_ext_ss;  // 409,600-byte image inserted
 
@@ -1110,10 +1089,8 @@ always @(posedge clk_sys) begin
 	end
 end
 
-// ROM is stored at word offset 0x00000/0x40000/0x80000/0xC0000 within the ROM
-// region, one per boot-ROM slot; the region has its own base, see
-// rtl/sdram_map.vh. Each image starts at its slot's own offset 0, for every
-// ROM size. Floppy images take their own path, the floppy_loader instances
+// ROM slots are 512KB apart in the ROM region (rtl/sdram_map.vh); each image
+// starts at its slot's offset 0. Floppy images take the floppy_loader path
 // above.
 reg [20:0] dio_a;
 reg [15:0] dio_data;
@@ -1139,10 +1116,8 @@ wire download_cycle = dio_download && dioBusControl;
 
 ////////////////////////// SDRAM /////////////////////////////////
 
-// Region bases come from rtl/sdram_map.vh, which is where they are kept
-// disjoint. They are added to their payloads rather than concatenated, which
-// is exact here because every base's low bits are zero below the payload's
-// width, so no add can carry. See that file before moving one.
+// Region bases from rtl/sdram_map.vh, added rather than concatenated; exact
+// because each base's low bits are zero below its payload.
 wire dsk_cycle = dskReadAckInt || dskReadAckExt || dskLoadWrEn;
 
 wire [24:0] sdram_addr = download_cycle ? (`SDRAM_ROM_BASE  + dio_a[20:0])       :
