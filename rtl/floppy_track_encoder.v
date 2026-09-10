@@ -3,14 +3,14 @@
 
  encode a full floppy track from raw sector data on the fly
 
- FORMAT RELAY (wr_* below)
+ The format relay (wr_* below)
 
  This encoder lays a track out from sector data, so it keeps no record of
- WHERE on the media anything was written. A normal sector write needs none:
+ where on the media anything was written. A normal sector write needs none:
  the Mac writes a data field straight behind the address field it has just
  read, i.e. into the very place this encoder is about to generate it. A
  format is different. The Plus ROM writes a whole track in one pass -
- 1200 bytes of sync, then every sector's address AND data field, sector 0
+ 1200 bytes of sync, then every sector's address and data field, sector 0
  first ($419282) - and then, with the head just past the end of what it
  wrote, reads the next address field to come round and requires it to be
  sector 0 ($419214; otherwise fmt1Err, -82, "can't find sector 0 after

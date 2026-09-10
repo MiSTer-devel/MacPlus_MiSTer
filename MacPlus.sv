@@ -78,14 +78,12 @@ localparam CONF_STR = {
 	// Extension list is MacLC.sv:81 verbatim - the host-side translation is
 	// keyed off the file, not the core, so the lists must agree.
 	// The D0 prefix here and on SC0/SC1/OI/OFG greys these items out on a
-	// model with no SCSI bus, from status_menumask bit 0 below. Uppercase D
-	// greys when the mask bit is set, lowercase d when it is clear
-	// (Main_MiSTer menu.cpp), and prefixes chain two characters at a time.
+	// model with no SCSI bus, from status_menumask bit 0 below.
 	"D0SC4,ISOTO*CUEBINCHD,Mount CD-ROM;",
 	// Apple HD20 on the external floppy port. A hard disk image like the SCSI
 	// slots above, so it takes their SC form and their extension list rather
-	// than the floppies' S/DSK. Mounting one replaces the external floppy for
-	// as long as it is mounted - see rtl/iwm.v. The drive is not model-gated;
+	// than the floppies' S/DSK. The external floppy sits behind it on the
+	// daisy chain - see rtl/iwm.v. The drive is available on every model;
 	// only the Mac-side driver differs, which readme.md sets out.
 	"SC5,IMGVHD,Mount HD20;",
 	"D0OI,CD-ROM Drive,Enabled,Disabled;",
@@ -166,7 +164,7 @@ end
 
 // SCSI targets: index 0/1 are the disks at IDs 6/5, index 2 is the CD-ROM at
 // ID 3. The index order here is the ncr5380's
-// internal device order, not the hps_io slot order - see the slot mapping below.
+// internal device order, NOT the hps_io slot order - see the slot mapping below.
 localparam SCSI_DEVS   = 3;
 localparam SCSI_CD_DEV = 2;
 // VDNUM: slots 0/1 = SCSI disks (unchanged), slots 2/3 = the two floppies
@@ -799,7 +797,7 @@ dataController_top #(.SCSI_DEVS(SCSI_DEVS), .SCSI_CD_DEV(SCSI_CD_DEV)) dc0
 	// floppy disk interface
 	.insertDisk({dsk_ext_ins, dsk_int_ins}),
 	.img800k({dsk_ext_ds, dsk_int_ds}),
-	// mac_model's drive800k, straight through: the ROM asks the DRIVE, and
+	// mac_model's drive800k, straight through: the ROM asks the drive, and
 	// floppy.v's doubleSidedDisk takes it as its first ceiling.
 	.drive800k(drive800k),
 	// each floppy_loader's mount-time verdict on the medium it just loaded

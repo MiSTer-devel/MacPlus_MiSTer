@@ -65,7 +65,7 @@ module mac_model
 			// The 512K and 128K run the 64K ROM in slot 2. RAM is soldered and
 			// its size is the one hardware difference between them. The 64K ROM
 			// has no SCSI Manager, and both shipped a mechanically single-sided
-			// drive, so an 800K image cannot be read at all.
+			// drive, so only side 0 of an 800K image is ever read.
 			MODEL_512K: begin
 				configROMSize = 2'b00;                    // 64K, releases/boot2.rom
 				configRAMSize = 2'b01;                    // 512K, soldered

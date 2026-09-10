@@ -89,9 +89,8 @@ module floppy
 	// header by floppy_loader.v: 1 = the volume is double-sided, or the
 	// image carries nothing recognisable. See doubleSidedDisk below.
 	input mediaSides,
-	// Spindle duty index, 0..399, computed by dataController_top.sv exactly as
-	// the hardware does: low 6 bits -> 64-entry table -> sum of 100 -> /10 - 11.
-	// duty%% = index/4.19. Only a 400K mechanism obeys it; see the tachometer.
+	// Spindle duty index, 0..399, from rtl/disk_pwm_duty.v. Only a 400K
+	// mechanism obeys it; see the tachometer.
 	input [8:0] disk_pwm,
 	output diskEject,
 
@@ -140,8 +139,8 @@ module floppy
 		1'b0, // INSTALLED = yes
 		1'b0, // READY = yes
 		// SIDES: the 128K and 512K shipped a mechanically single-sided 400K
-		// drive. MacPlus.sv gates the media on this same signal; this gates
-		// the mechanism, which is the half the ROM interrogates.
+		// drive. This is the mechanism, which is what the ROM interrogates;
+		// the medium's own sidedness is doubleSidedDisk below.
 		drive800k, // SIDES: 1 = double-sided drive, 0 = single-sided
 		1'b0, // UNUSED
 		1'b0, // SUPERDR
@@ -169,6 +168,13 @@ module floppy
 	reg old_newByteReady;
 	always @(posedge clk) old_newByteReady <= newByteReady;
 	
+	// format relay signals, driven by the write path below
+	wire        secAmark;
+	wire [3:0]  secAmarkSector;
+	wire        secFmtMark;
+	wire        secFmtDs;
+	reg         wrEnd;
+
 	// include track encoder
 	floppy_track_encoder enc
 	(
@@ -386,7 +392,7 @@ module floppy
 	// byte to the decoder on the edge that clears writeBusyReg, and the mark
 	// is reported two clocks after that. A disk change ends a burst too, so
 	// the relay cannot stay armed for a departing disk.
-	reg  wrBusyPrev, wrEndD1, wrEnd;
+	reg  wrBusyPrev, wrEndD1;
 	wire wrBusy = (writeMode && _enable == 1'b0) || writeBusyReg;
 	always @(posedge clk or negedge _reset) begin
 		if (_reset == 1'b0) begin
@@ -405,10 +411,6 @@ module floppy
 	wire [21:0] secAddr;
 	wire [8:0]  wcBufAddr;
 	wire [7:0]  wcBufData;
-	wire        secAmark;
-	wire [3:0]  secAmarkSector;
-	wire        secFmtMark;
-	wire        secFmtDs;
 
 	floppy_track_decoder dec
 	(
@@ -619,19 +621,19 @@ module floppy
 	end
 
 	// DRIVE_REG_TACH  7  Tachometer (produces 60 pulses for each rotation of the drive motor)
-	/* Data from mess, sonydriv.c:
-	   Tracks	rpm   Timing Value
+	/* Data from MESS, sonydriv.c:
+	   Tracks	RPM   Timing Value
 	   00-15:   402   timing value $117B (acceptable range {1135-11E9})
 	   16-31:   438   timing value $???? (acceptable range {12C6-138A})
 	   32-47:   482   timing value $???? (acceptable range {14A7-157F})
 	   48-63:   536   timing value $???? (acceptable range {16F2-17E2})
 	   64-79:   603   timing value $???? (acceptable range {19D0-1ADE})
 
-	   The rpm column is corrected: mess labels these 500/550/600/675/750, but
-	   the real CLV speeds (Guide to the Macintosh Family Hardware) are the
-	   ones above. The periods below give rpm = clk8 / (2*period), since TACH
-	   is 60 pulses (120 edges) per revolution: 9996 -> 406 rpm, 9122 -> 445,
-	   8292 -> 490, 7463 -> 544, 6634 -> 612, all within ~1.5% of that table.
+	   RPM per Guide to the Macintosh Family Hardware; sonydriv.c labels the
+	   same rows 500/550/600/675/750. The periods below give rpm =
+	   clk8 / (2*period), since TACH is 60 pulses (120 edges) per revolution:
+	   9996 -> 406 rpm, 9122 -> 445, 8292 -> 490, 7463 -> 544, 6634 -> 612,
+	   all within ~1.5% of that table.
 		
 		Experimentally determined toggle rates for Plus Too with 8.125 MHz CPU clock:
 		TACH Half Period Clocks		Resulting Timing Value

@@ -59,19 +59,19 @@ A matching harddisk image file can be found [here](https://github.com/MiSTer-dev
 
 A tool to create harddisk images (with working SCSI driver and partition table) is available [here](https://diskjockey.onegeekarmy.eu/).
 
-## Apple HD 20 support
+## Apple HD20 support
 
-An Apple HD 20 - the DCD (Directly Connected Disk) drive that hangs off the external floppy port rather than the SCSI bus - is emulated and selected from the "Mount HD20" entry in the on-screen display. It takes the same .img or .vhd image format as the SCSI disks, is readable and writable, and honours an image marked read-only on the SD card.
+An Apple HD20 - the DCD (Directly Connected Disk) drive that hangs off the external floppy port rather than the SCSI bus - is emulated and selected from the "Mount HD20" entry in the on-screen display. It takes the same .img or .vhd image format as the SCSI disks, is readable and writable, and honours an image marked read-only on the SD card.
 
-A floppy drive can be daisy-chained behind the HD 20, as on real hardware - the shipping drive had a floppy connector on its back panel - so the internal floppy, the HD 20 and an external floppy are all usable at once.
+A floppy drive can be daisy-chained behind the HD20, as on real hardware - the shipping drive had a floppy connector on its back panel - so the internal floppy, the HD20 and an external floppy are all usable at once.
 
-The Mac reaches a chained floppy only by walking the chain, and only its DCD driver does that. Mount an HD 20 and then boot a System that has no HD 20 driver, and the external floppy cannot be addressed at all until the HD 20 is unmounted. A real machine behaved the same way; there the remedy was to unplug the drive.
+The Mac reaches a chained floppy only by walking the chain, and only its DCD driver does that. Mount an HD20 and then boot a System that has no HD20 driver, and the external floppy cannot be addressed at all until the HD20 is unmounted. A real machine behaved the same way; there the remedy was to unplug the drive.
 
 The drive is the same on every model; what differs is the Mac-side driver. A Plus or a 512Ke carries the DCD driver in its 128K ROM and boots straight from an HD20. A 512K needs Apple's "Hard Disk 20" startup floppy, which patches the driver in at boot, and that floppy also expects a System Folder on the HD20 itself. A 128K cannot load the patch and will not mount an HD20.
 
 The 20MB of the original drive is not a limit here: the protocol carries 24-bit block numbers, so the capacity is whatever the mounted image holds, up to HFS's own 2GB ceiling.
 
-Two details differ from a real HD 20. The 20 file-system tag bytes each block carried on the platter are returned as zeros, since a plain disk image has nowhere to store them; the Mac copies them but does not check them. And Write-Verify is served as a plain write - there is no platter to read back from, so the read-back would only compare the sector buffer against itself.
+Two details differ from a real HD20. The 20 file-system tag bytes each block carried on the platter are returned as zeros, since a plain disk image has nowhere to store them; the Mac copies them but does not check them. And Write-Verify is served as a plain write - there is no platter to read back from, so the read-back would only compare the sector buffer against itself.
 
 ## CD-ROM support
 

@@ -17,13 +17,13 @@
 //
 // `done` (and therefore the caller's insertDisk latch) does not fire until
 // the whole image is resident, so the Mac can never observe a disk that is
-// only partially loaded - the SD-mount equivalent of the old code's
-// old_down-&&-~dio_download end-of-download latch.
+// only partially loaded - the SD-mount equivalent of the end-of-download
+// latch the old ioctl_download path used.
 //
-// Phase 7 adds one passenger to that stream: the MEDIUM SNIFF (media_ds
-// below). Every sector already passes through the staging BRAM word by
-// word, so reading four words out of sector 2 as it goes by costs three
-// compares and no extra access anywhere.
+// The medium sniff (media_ds below) rides on the same stream: every sector
+// already passes through the staging BRAM word by word, so reading four
+// words out of sector 2 as it goes by costs three compares and no extra
+// access anywhere.
 module floppy_loader
 (
 	input         clk_sys,
@@ -96,14 +96,13 @@ end
 //
 // Nothing on a 3.5" diskette records whether it is single- or double-
 // sided; that was a certification printed on the box, and the drive
-// cannot tell. What CAN be told is how big the volume last formatted onto
+// cannot tell. What can be told is how big the volume last formatted onto
 // it is, and that is what the .Sony driver's address-field format byte
 // has to agree with. So read the volume's own size out of the Master
 // Directory Block and let the medium speak for itself, instead of
-// asserting a geometry from the size of the file holding it - the defect
-// this phase exists to fix.
+// asserting a geometry from the size of the file holding it.
 //
-// The MDB is at image byte 1024, i.e. file sector 2, under BOTH the
+// The MDB is at image byte 1024, i.e. file sector 2, under both the
 // single- and double-sided mappings (block 2 is cylinder 0 side 0 sector
 // 2 either way), which is the whole reason this can be done before the
 // geometry is known. drNmAlBlks and drAlBlkSiz sit at MDB offsets 18 and

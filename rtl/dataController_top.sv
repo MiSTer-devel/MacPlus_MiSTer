@@ -81,9 +81,9 @@ module dataController_top(
 	// misc
 	output memoryOverlayOn,
 	input [1:0] insertDisk,
-	input [1:0] img800k,    // mounted FILE is 819,200 bytes: see floppy.v's port comment
-	input drive800k,        // drive MECHANISM: see floppy.v's port comment
-	input [1:0] mediaSides, // what the MEDIUM said at mount: see floppy.v
+	input [1:0] img800k,    // mounted file is 819,200 bytes: see floppy.v's port comment
+	input drive800k,        // drive mechanism: see floppy.v's port comment
+	input [1:0] mediaSides, // what the medium said at mount: see floppy.v
 	output [1:0] diskEject,
 	output [1:0] diskMotor,
 	output [1:0] diskAct,
@@ -161,9 +161,8 @@ module dataController_top(
 	always @(posedge clk32)
 		if (clk8_en_n) loadSoundD <= loadSound;
 
-	// Spindle duty for a 400K drive, computed in rtl/disk_pwm_duty.v exactly
-	// as the hardware does it: low 6 bits -> 64-entry conversion table ->
-	// sum of 100 -> /10 - 11, clamped 0..399.
+	// Spindle duty for a 400K drive, from the low bits of each sound-buffer
+	// word; see rtl/disk_pwm_duty.v.
 	wire [8:0] disk_pwm;
 	disk_pwm_duty disk_pwm_duty_inst
 	(

@@ -132,7 +132,6 @@ module dcd
 	input        ca0,
 	input        ca1,
 	input        ca2,
-	input        lstrb,
 	input        _enable,
 
 	input  [7:0] writeData,
@@ -224,7 +223,7 @@ module dcd
 	(
 		.clk(clk), .cep(cep), .cen(cen), .turbo(turbo),
 		._reset(_reset),
-		.ca0(ca0), .ca1(ca1), .ca2(ca2), .lstrb(lstrb), ._enable(_enable),
+		.ca0(ca0), .ca1(ca1), .ca2(ca2), ._enable(_enable),
 		.writeData(writeData), .writeReq(writeReq),
 		.readData(readData), .newByteReady(newByteReady),
 		.present(present),
@@ -251,25 +250,10 @@ module dcd
 	// users see. That the Mac renders it correctly, length byte and all, at
 	// this exact offset also confirms the identity block is byte-accurate
 	// this far in.
+	localparam [95:0] TRAILER = {8'd11, "MiSTer HD20"};   // Pascal string
 	function [7:0] trailerChar;
 		input [3:0] i;
-		begin
-			case (i)
-			4'd0:  trailerChar = 8'd11;   // Pascal length
-			4'd1:  trailerChar = "M";
-			4'd2:  trailerChar = "i";
-			4'd3:  trailerChar = "S";
-			4'd4:  trailerChar = "T";
-			4'd5:  trailerChar = "e";
-			4'd6:  trailerChar = "r";
-			4'd7:  trailerChar = " ";
-			4'd8:  trailerChar = "H";
-			4'd9:  trailerChar = "D";
-			4'd10: trailerChar = "2";
-			4'd11: trailerChar = "0";
-			default: trailerChar = 8'h00;
-			endcase
-		end
+		trailerChar = (i < 4'd12) ? TRAILER[8*(11 - i) +: 8] : 8'h00;
 	endfunction
 
 	wire [23:0] maxBlock = (blockCount == 24'd0) ? 24'd0 : (blockCount - 24'd1);
@@ -371,7 +355,7 @@ module dcd
 	// bytes the ROM prefetches from $19C in its transmit prologue.
 	wire  [7:0] cmdBlocks = rxBuf[15:8];
 	wire [23:0] cmdLba    = {rxBuf[23:16], rxBuf[31:24], rxBuf[39:32]};
-	wire  [9:0] askedLen  = {rxRspGroups, 3'b000} - {3'b000, rxRspGroups} - 10'd1;
+	wire  [9:0] askedLen  = rxRspGroups * 10'd7 - 10'd1;   // groups*7 - 1
 
 	// Bit 6 is the continued-write marker; bits 5:0 are the opcode proper.
 	wire  [5:0] cmdOp     = opcode[5:0];

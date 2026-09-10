@@ -11,7 +11,7 @@
 //   3. index = sum/(count/10) - 11, clamped to 0..399,
 //   4. duty% = index / 4.19.
 //
-// Step 1 is not a detail. The table is a permutation (0, 1, 59, 2, 60, 40,
+// Step 1 matters. The table is a permutation (0, 1, 59, 2, 60, 40,
 // 54, 3, ...), so the raw 6-bit value bears no useful monotonic relation to
 // the real duty: sum the raw values instead and the result wanders more or
 // less independently of what the Mac asked for, and the ROM's speed loop
@@ -26,9 +26,7 @@ module disk_pwm_duty
 );
 
 	// Conversion table, per the 400KB drive specification (values as used by
-	// MAME's sonydriv). Its output is registered by the three-stage pipeline
-	// below, which exists because the combinational form missed setup by
-	// 3.9 ns.
+	// MAME's sonydriv).
 	function [5:0] pwm_convert(input [5:0] v);
 		case (v)
 		6'd0 : pwm_convert = 6'd0;
@@ -98,7 +96,7 @@ module disk_pwm_duty
 		endcase
 	endfunction
 
-	// Pipelined in three stages, deliberately. Doing the accumulate, the
+	// Pipelined in three stages. Doing the accumulate, the
 	// sum*205 scaling and the clamp in one combinational chain missed the
 	// clk_sys setup budget by 3.9 ns. Samples arrive roughly every 2 us and
 	// the window is 100 of them, so two extra cycles here cost nothing

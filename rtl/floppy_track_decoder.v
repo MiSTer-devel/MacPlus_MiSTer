@@ -31,7 +31,7 @@
  Address fields (D5 AA 96) are reported, not decoded. A normal sector write
  never contains one - the Mac writes a data field straight behind the
  address field it just read - so one in the write stream means the track is
- being FORMATTED, and floppy_track_encoder.v then needs to know where the
+ being formatted, and floppy_track_encoder.v then needs to know where the
  formatter put its sectors (its header explains why). `amark` pulses once
  per address field with the sector number; the track/side bytes are not
  checked because the drive's own head position decides where the data
@@ -42,10 +42,10 @@
  report it. It is the one place the medium's own sidedness is ever stated:
  bit 5 set means the track being laid down is two-sided, clear means
  one-sided, and the low five bits are the interleave code, which this
- decoder ignores. Unlike the sector
- number this IS checksum-gated - a mis-synced match that slipped through
- would not cost one sector, it would change the geometry of the whole
- disk - and the checksum byte is the next one along anyway.
+ decoder ignores. Unlike the sector number this is checksum-gated: a
+ mis-synced match that slipped through would not cost one sector, it would
+ change the geometry of the whole disk, and the checksum byte is the next
+ one along anyway.
 
  The nibble-recovery arithmetic below is a direct RTL port of the reference
  decoder proved out against this project's

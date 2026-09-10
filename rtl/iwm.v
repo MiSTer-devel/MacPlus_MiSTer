@@ -52,10 +52,10 @@ module iwm
 	output [15:0] dataOut,
 	input [1:0] insertDisk,
 	output [1:0] diskEject,
-	input [1:0] img800k,    // mounted FILE is 819,200 bytes: see floppy.v's port comment
-	input drive800k,        // drive MECHANISM: see floppy.v's port comment
-	input [1:0] mediaSides, // what the MEDIUM said at mount: see floppy.v
-	input [8:0] disk_pwm, // spindle duty INDEX 0..399: see floppy.v's tachometer
+	input [1:0] img800k,    // mounted file is 819,200 bytes: see floppy.v's port comment
+	input drive800k,        // drive mechanism: see floppy.v's port comment
+	input [1:0] mediaSides, // what the medium said at mount: see floppy.v
+	input [8:0] disk_pwm,   // spindle duty index 0..399: see floppy.v's tachometer
 	
 	output [1:0] diskMotor,
 	output [1:0] diskAct,
@@ -215,7 +215,7 @@ module iwm
 		.ca2(ca2),
 		.SEL(SEL),
 		.lstrb(lstrb),
-		// ~selectExternalDrive is load-bearing. A real IWM has one disk-enable
+		// The ~selectExternalDrive term is essential. A real IWM has one disk-enable
 		// register bit ($1000/$1200) steered by SELECT ($1400/$1600) to /ENBL1
 		// or /ENBL2, so exactly one drive is ever enabled; here the two ports
 		// are independent latches, and the ROM's chain search asserts the
@@ -351,7 +351,6 @@ module iwm
 		.ca0(ca0),
 		.ca1(ca1),
 		.ca2(ca2),
-		.lstrb(lstrb),
 		._enable(~(diskEnableExt & ~chainSel)),
 		.writeData(dataIn[7:0]),
 		.writeReq(writeReqDcd), // one-shot: see dataRegWriteSeen above

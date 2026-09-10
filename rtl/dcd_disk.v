@@ -5,24 +5,22 @@
    read-only). rtl/dcd.v drives it one block at a time, because that is how
    the protocol works.
 
-   Byte lanes are not a free choice. The HPS packs disk byte 0 into
-   sd_buff_dout[7:0], so even bytes go in buffer0 and odd ones in buffer1 -
-   the same mapping rtl/scsi.v uses. Backwards, it transposes every byte pair
-   in every sector and is invisible until something reads a filesystem. This
-   module is byte-addressed on the command side so the caller never has to
-   think about it.
+   Byte lanes follow the HPS, which packs disk byte 0 into sd_buff_dout[7:0]:
+   even bytes go in buffer0 and odd ones in buffer1, the same mapping
+   rtl/scsi.v uses. Swapped, every byte pair in every sector is transposed,
+   which only shows once something reads a filesystem. This module is
+   byte-addressed on the command side so the caller never has to think
+   about it.
 
-   The buffer is a local copy of scsi_dpram's shape rather than an
-   instantiation: scsi_dpram lives inside rtl/scsi.v, and a DCD device has to
-   work on a 512Ke, a machine defined by having no SCSI at all.
+   The buffer is two planes of rtl/scsi.v's scsi_dpram, one per lane.
 
    sd_buff_wr is shared across every slot and must be qualified against this
    module's own sd_ack, or another slot's transfer writes into its sector.
    rtl/floppy_loader.v makes the same guard for the same reason.
 
-   The ack timeout is not defensive padding: without it a stalled or absent
-   HPS response leaves the drive holding /HSHK forever, which the Mac sees as
-   a hung bus rather than a failed command.
+   The ack timeout exists because a stalled or absent HPS response would
+   otherwise leave the drive holding /HSHK forever, which the Mac sees as a
+   hung bus rather than a failed command.
 */
 
 module dcd_disk #(
@@ -113,7 +111,7 @@ module dcd_disk #(
 	always @(posedge clk) buf_lane_q <= buf_addr[0];
 	assign buf_q = buf_lane_q ? buf1_qb : buf0_qb;
 
-	dcd_dpram buffer0
+	scsi_dpram #(.ADDRWIDTH(8)) buffer0
 	(
 		.clock(clk),
 		.address_a(sd_buff_addr), .data_a(sd_buff_dout[7:0]),
@@ -122,7 +120,7 @@ module dcd_disk #(
 		.wren_b(buf_we & ~buf_addr[0]), .q_b(buf0_qb)
 	);
 
-	dcd_dpram buffer1
+	scsi_dpram #(.ADDRWIDTH(8)) buffer1
 	(
 		.clock(clk),
 		.address_a(sd_buff_addr), .data_a(sd_buff_dout[15:8]),
@@ -192,42 +190,5 @@ module dcd_disk #(
 			default: state <= IDLE;
 		endcase
 	end
-
-endmodule
-
-// Two-port byte RAM, the shape rtl/scsi.v's scsi_dpram already proved on this
-// core. Local rather than shared; see the header.
-module dcd_dpram #(parameter DATAWIDTH=8, ADDRWIDTH=8)
-(
-	input                      clock,
-
-	input     [ADDRWIDTH-1:0]  address_a,
-	input     [DATAWIDTH-1:0]  data_a,
-	input                      wren_a,
-	output reg [DATAWIDTH-1:0] q_a,
-
-	input     [ADDRWIDTH-1:0]  address_b,
-	input     [DATAWIDTH-1:0]  data_b,
-	input                      wren_b,
-	output reg [DATAWIDTH-1:0] q_b
-);
-
-reg [DATAWIDTH-1:0] ram[0:(1<<ADDRWIDTH)-1];
-
-always @(posedge clock) begin
-	if (wren_a) begin
-		ram[address_a] <= data_a;
-		q_a <= data_a;
-	end
-	else q_a <= ram[address_a];
-end
-
-always @(posedge clock) begin
-	if (wren_b) begin
-		ram[address_b] <= data_b;
-		q_b <= data_b;
-	end
-	else q_b <= ram[address_b];
-end
 
 endmodule
