@@ -1,24 +1,8 @@
-// Mount-time floppy image loader.
-//
-// Floppies were previously a one-way ioctl_download blob into SDRAM. This
-// module replaces that with a real SD
-// block-device mount: on img_mounted it streams the whole image in via
-// sd_rd, sector by sector, into the SAME SDRAM byte offsets the read side
-// (dskReadAddrInt/Ext in addrController_top.v) already expects, so nothing
-// downstream of SDRAM changes. Still read-only - no sd_wr, no write-back.
-//
-// Each sector is staged into a small local BRAM as it streams in (sd_buff_wr
-// has no rate limit against on-chip RAM), then drained out to SDRAM one word
-// at a time through the shared extra-slot-3 port in addrController_top.v -
-// that slot recurs roughly every 2us, so draining is the slow half of a
-// mount (a 1600-sector 800K image takes on the order of a second). Load-
-// then-drain per sector, not double-buffered - correctness first; the gate
-// here is booting exactly as before, not load speed.
-//
-// `done` (and therefore the caller's insertDisk latch) does not fire until
-// the whole image is resident, so the Mac can never observe a disk that is
-// only partially loaded - the SD-mount equivalent of the end-of-download
-// latch the old ioctl_download path used.
+// Mount-time floppy image loader: on img_mounted the whole image is streamed
+// in via sd_rd, sector by sector, to the SDRAM offsets the read side expects
+// (dskReadAddrInt/Ext in addrController_top.v). Each sector is staged in a
+// local BRAM, then drained to SDRAM one word at a time through the shared
+// extra-slot-3 port. `done` fires only once the whole image is resident.
 module floppy_loader
 (
 	input         clk_sys,
@@ -71,9 +55,7 @@ reg  [7:0] word_idx;   // 0..255 within the current sector
 reg [10:0] sector;     // sector index within the image (up to 1600 for 800K)
 reg [10:0] nsect;      // total sectors, latched at mount
 
-// Latch every mount request unconditionally, mirroring the UK101
-// disk_reader.sv precedent - a mount
-// arriving while a previous load is still draining must not be dropped.
+// latch every mount request; one arriving during a drain must not be dropped
 reg mount_pending;
 always @(posedge clk_sys) begin
 	if (reset) mount_pending <= 1'b0;
@@ -179,13 +161,7 @@ always @(posedge clk_sys) begin
 		SD_WAIT_ACK: if (sd_ack) state <= SD_WAIT_DONE;
 
 		SD_WAIT_DONE: begin
-			// hps_io's sd_buff_dout and the ROM-download ioctl_dout both come
-			// from the same raw HPS word (io_din in hps_io.sv) - the existing
-			// ROM download path byte-swaps it before writing to SDRAM
-			// (`dio_data <= {ioctl_data[7:0], ioctl_data[15:8]}` below), and
-			// the read side (extra_rom_data_demux in MacPlus.sv) expects that
-			// same convention. Missing this swap here silently transposes
-			// every byte pair in every mounted image.
+			// byte-swap as the ROM download path does; the read side expects it
 			if (sd_buff_wr && sd_ack) buf_mem[sd_buff_addr] <= {sd_buff_dout[7:0], sd_buff_dout[15:8]};
 			if (!sd_ack) begin
 				sd_rd    <= 1'b0;
@@ -194,10 +170,7 @@ always @(posedge clk_sys) begin
 			end
 		end
 
-		// One cycle for buf_rd to catch up to buf_mem[word_idx] before the
-		// first DRAIN_ASSERT reads it - buf_rd is a registered (one-cycle-
-		// latency) BRAM read, so reading it on the same cycle word_idx
-		// changes would serve the PREVIOUS word.
+		// one cycle for the registered buf_rd to catch up with word_idx
 		DRAIN_FETCH: state <= DRAIN_ASSERT;
 
 		DRAIN_ASSERT: begin
