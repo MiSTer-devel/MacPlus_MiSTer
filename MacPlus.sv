@@ -19,6 +19,9 @@
 //  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 //============================================================================
 
+// SDRAM region map: RAM, boot ROMs, floppy image staging
+`include "rtl/sdram_map.vh"
+
 module emu
 (
 	`include "sys/emu_ports.vh"
@@ -61,47 +64,44 @@ localparam CONF_STR = {
 	"S2,DSK,Mount Pri Floppy;",
 	"S3,DSK,Mount Sec Floppy;",
 	"-;",
-	"SC0,IMGVHD,Mount SCSI-6;",
-	"SC1,IMGVHD,Mount SCSI-5;",
+	"D0SC0,IMGVHD,Mount SCSI-6;",
+	"D0SC1,IMGVHD,Mount SCSI-5;",
 	"-;",
-	// CD-ROM (SCSI ID 3). CUE/BIN/CHD/TOAST are translated host-side by
-	// Main_MiSTer's support/mac into a flat 2048-byte-sector view of the data
-	// track, so the core still sees plain 2048 sectors and the TOC the target
-	// reports stays consistent with what the guest is shown. Audio tracks are
-	// hidden from that view; rtl/cd_audio.sv plays them from the real track
-	// list instead.
-	// Extension list is MacLC.sv:81 verbatim - the host-side translation is
-	// keyed off the file, not the core, so the lists must agree.
-	// No conditional-visibility prefix here - MacLC_MiSTer declares its
-	// equivalent slot plainly, and an `h` prefix hid the item outright.
-	"SC4,ISOTO*CUEBINCHD,Mount CD-ROM;",
-	"OI,CD-ROM Drive,Enabled,Disabled;",
-	// Index 0 MUST be Full: `status` defaults to zero and unity is the wanted
-	// default. Independent of the Mac's volume control on purpose -- on real
-	// hardware the Mac's setting had no effect on the drive, which had its own
-	// knob; this is the honest equivalent of that knob, and without it there is
-	// no way to balance the two sources at all. Bits 15-16 (F,G) were free.
-	"OFG,CD Volume,Full,3/4,1/2,Off;",
+	// CD-ROM (SCSI ID 3): CUE/BIN/CHD/TOAST are flattened host-side by
+	// Main_MiSTer's support/mac to 2048-byte sectors; audio tracks are played
+	// by rtl/cd_audio.sv. The extension list must match MacLC.sv's.
+	// D0: greyed out on a model with no SCSI bus (status_menumask bit 0)
+	"D0SC4,ISOTO*CUEBINCHD,Mount CD-ROM;",
+	// Apple HD20 on the external floppy port, a hard disk image like SCSI
+	"SC5,IMGVHD,Mount HD20;",
+	"D0OI,CD-ROM Drive,Enabled,Disabled;",
+	// index 0 = Full: `status` defaults to zero. Independent of the Mac's own
+	// volume, as the drive's knob was
+	"D0OFG,CD Volume,Full,3/4,1/2,Off;",
 	"-;",
 	"O78,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"OBC,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
 	"-;",
-	"O9,Model,Plus,SE;",
+	// three bits for five models; layout change, hence the config version bump
+	"O13,Model,Plus,SE,512K,128K,512Ke;",
 	"O5,Speed,8MHz,16MHz;",
 	"O6,Floppy Write,Off,On;",
 	"ODE,CPU,68000,68010,68020;",
-	"O4,Memory,1MB,4MB;",
+	"D1O4,Memory,1MB,4MB;",
 	"-;",
 	//"OA,Serial,Off,On;",
 	//"-;",
 	"R0,Reset & Apply CPU+Memory;",
-	"v,0;", // [optional] config version 0-99. 
+	"v,1;", // [optional] config version 0-99.
 	        // If CONF_STR options are changed in incompatible way, then change version number too,
 			// so all options will get default values on first start.
 	"V,v",`BUILD_DATE
 };
 
 wire status_turbo = status[5];
+
+// OSD items unavailable on the selected model; driven beside mac_model below
+wire [15:0] status_menumask;
 
 ////////////////////   CLOCKS   ///////////////////
 
@@ -118,7 +118,7 @@ pll pll
 
 reg       status_mem;
 reg [1:0] status_cpu;
-reg       status_mod;
+reg [2:0] status_model;
 reg       n_reset = 0;
 always @(posedge clk_sys) begin
 	reg [15:0] rst_cnt;
@@ -133,7 +133,7 @@ always @(posedge clk_sys) begin
 			rst_cnt    <= rst_cnt - 1'd1;
 			status_mem <= status[4];
 			status_cpu <= status[14:13];
-			status_mod <= status[9];
+			status_model <= status[3:1];
 		end
 		else begin
 			n_reset <= 1;
@@ -143,17 +143,12 @@ end
 
 ///////////////////////////////////////////////////
 
-// SCSI targets: index 0/1 are the disks at IDs 6/5, index 2 is the CD-ROM at
-// ID 3. The index order here is the ncr5380's
-// internal device order, NOT the hps_io slot order - see the slot mapping below.
+// SCSI targets: index 0/1 the disks at IDs 6/5, index 2 the CD-ROM at ID 3
+// (the ncr5380's device order, not the hps_io slot order; see below)
 localparam SCSI_DEVS   = 3;
 localparam SCSI_CD_DEV = 2;
-// VDNUM: slots 0/1 = SCSI disks (unchanged), slots 2/3 = the two floppies
-// (converted from ioctl_download F1/F2 to real S-type block-device mounts),
-// slot 4 = CD-ROM. The per-slot
-// latch-at-own-mount-pulse pattern below mirrors the UK101 core's
-// four-drive support (VDNUM=5 there).
-localparam VDNUM = 5;
+// VDNUM: slots 0/1 SCSI disks, 2/3 floppies, 4 CD-ROM, 5 the HD20
+localparam VDNUM = 6;
 
 // the status register is controlled by the on screen display (OSD)
 wire [31:0] status;
@@ -162,12 +157,7 @@ wire [31:0] sd_lba[VDNUM];
 wire  [VDNUM-1:0] sd_rd;
 wire  [VDNUM-1:0] sd_wr;
 wire  [VDNUM-1:0] sd_ack;
-// 13 bits, not 8: hps_io drives [AW:0] with AW = WIDE ? 12 : 13, and every
-// transfer this core did before the CD-ROM was 512 bytes = 256 16-bit words =
-// exactly 8 bits, so the top 5 were silently truncated and nothing noticed.
-// CD-DA frames are 2352 bytes = 1176 words and need 11. Consumers that still
-// want 512-byte addressing slice [7:0] explicitly at their port - identical
-// bits to what the implicit truncation gave them (MacLC.sv:203 does the same).
+// 13 bits: CD-DA frames are 1176 words; 512-byte consumers slice [7:0]
 wire           [12:0] sd_buff_addr;
 wire signed    [15:0] cd_snd_l, cd_snd_r;   // CD-DA pair, summed in by cd_mix
 wire           [15:0] sd_buff_dout;
@@ -177,15 +167,8 @@ wire  [VDNUM-1:0] img_mounted;
 wire           [63:0] img_size;
 wire                  img_readonly;
 
-// SCSI (dataController_top) only ever sees slots 0/1 of the VDNUM=4 arrays
-// above - these are its own narrower view, mirroring how each floppy_loader
-// below gets scalar per-slot ports instead of an array (the same pattern
-// UK101.sv uses per-drive: each consumer indexes the shared array itself,
-// no consumer declares its own sub-array port).
-// SCSI device index -> hps_io slot: 0 -> 0 (disk, ID 6), 1 -> 1 (disk, ID 5),
-// 2 -> 4 (CD-ROM, ID 3). Slots 2/3 belong to the floppies, so the CD's slot is
-// deliberately not contiguous with the disks' and every SCSI vector has to be
-// assembled by hand rather than sliced.
+// SCSI device index -> hps_io slot: 0 -> 0 (ID 6), 1 -> 1 (ID 5), 2 -> 4
+// (CD-ROM, ID 3); slots 2/3 are the floppies
 wire [31:0] scsi_sd_lba[SCSI_DEVS];
 wire [15:0] scsi_sd_buff_din[SCSI_DEVS];
 wire [SCSI_DEVS-1:0] scsi_sd_rd, scsi_sd_wr;
@@ -196,15 +179,17 @@ assign sd_buff_din[0] = scsi_sd_buff_din[0];
 assign sd_buff_din[1] = scsi_sd_buff_din[1];
 assign sd_buff_din[4] = scsi_sd_buff_din[SCSI_CD_DEV];
 
-// CD-ROM drive present on the bus. Disabled (status[18] set) makes the CD
-// target never answer selection, so the SCSI bus is bit-identical to a
-// pre-CD build - both the period-purist switch and the A/B lever if the new
-// target misbehaves on hardware.
+// slot 5, the HD20; rtl/dcd.v owns it outright
+wire [31:0] dcd_sd_lba;
+wire        dcd_sd_rd, dcd_sd_wr;
+wire [15:0] dcd_sd_buff_din;
+assign sd_lba[5]      = dcd_sd_lba;
+assign sd_buff_din[5] = dcd_sd_buff_din;
+
+// CD-ROM drive present; disabled (status[18]) makes the target never answer
 wire cd_enable = ~status[18];
 
-// sd_buff_din[2]/[3] driven below by each drive's floppy_sd_writer -
-// only ever consulted by hps_io during a sd_wr session for that slot, which
-// only the writer ever asserts, so no mux against the loader is needed here.
+// sd_buff_din[2]/[3] are driven by each drive's floppy_sd_writer
 
 wire        ioctl_write;
 reg         ioctl_wait = 0;
@@ -225,6 +210,7 @@ hps_io #(.CONF_STR(CONF_STR), .VDNUM(VDNUM), .WIDE(1)) hps_io
 
 	.buttons(buttons),
 	.status(status),
+	.status_menumask(status_menumask),
 
 	.sd_lba(sd_lba),
 	.sd_rd(sd_rd),
@@ -270,17 +256,10 @@ assign VGA_SL = 0;
 
 wire [10:0] audio;
 
-// ---- Reclaim the Mac channel's headroom, then sum in the CD-DA pair ----
-// `audio` is SIGNED (audio_latch x volume, so +-127*7), and it carries a
-// +28,448 pedestal whenever sound is DISABLED -- deliberately, see
-// dataController_top.sv:171 and PR #12 / bug #7. MiSTer's own DC_blocker
-// strips that downstream, which is why nobody hears it today; but downstream is
-// AFTER our sum, so full-scale CD audio would be added onto the pedestal and
-// clipped before the framework ever saw it. rtl/cd_mix.v does the blocking in
-// here, ahead of the adder.
+// `audio` is signed and carries a +28,448 pedestal while sound is disabled;
+// rtl/cd_mix.v DC-blocks it ahead of the adder so CD audio cannot clip on it
 
-// 48 kHz strobe: that is where sys/audio_out.sv point-samples AUDIO_L/R.
-// 32.5 MHz / 677 = 48,006 Hz, 0.01% off -- irrelevant against a 1.9 Hz corner.
+// 48 kHz strobe, where sys/audio_out.sv samples AUDIO_L/R (32.5 MHz / 677)
 reg  [9:0] snd_ce_div = 0;
 reg        snd_ce = 0;
 always @(posedge clk_sys) begin
@@ -288,13 +267,8 @@ always @(posedge clk_sys) begin
 	else                       begin snd_ce_div <= snd_ce_div + 1'd1; snd_ce <= 1'b0; end
 end
 
-// The mount gate. NOT cd_audio.sv's `disc_audio`, tempting as that looks:
-// that is `toc_valid && !t2_has_data`, i.e. AUDIO-ONLY disc, so
-// it reads 0 for a mixed-mode disc -- a data track plus CD audio, which is
-// exactly what a game with CD audio is -- and the correction would never engage
-// for the main use case. Latch actual presence instead, the same way the floppy
-// slots do above. Gated on mounted rather than playing because "playing" flips
-// many times per disc and each flip would be a transition to manage mid-listen.
+// the mount gate, latched from actual presence rather than cd_audio's
+// disc_audio (which is 0 for a mixed-mode disc)
 reg cd_mounted = 0;
 always @(posedge clk_sys) begin
 	if (img_mounted[4]) cd_mounted <= (img_size != 0);
@@ -332,10 +306,46 @@ assign AUDIO_MIX = 0;
 
 
 
-// set the real-world inputs to sane defaults
-localparam 	  configROMSize = 1'b1;  // 128K ROM
+// The model selection becomes hardware straps in one place; see rtl/mac_model.v.
+wire [1:0] configROMSize;
+wire       scsiPresent;   // 1 = this model has a SCSI bus; see rtl/mac_model.v
+wire [1:0] configRAMSize;
+wire       machineType;
+wire [1:0] romSlot;
+wire       drive800k;
 
-wire [1:0] configRAMSize = status_mem?2'b11:2'b10; // 1MB/4MB
+mac_model mac_model
+(
+	.model         ( status_model  ),
+	.mem_big       ( status_mem    ),
+	.configROMSize ( configROMSize ),
+	.scsiPresent   ( scsiPresent   ),
+	.configRAMSize ( configRAMSize ),
+	.machineType   ( machineType   ),
+	.romSlot       ( romSlot       ),
+	.drive800k     ( drive800k     ),
+	.ramSoldered   (               )
+);
+
+// menu mask from the live status bits, so greying follows the selection
+wire menu_scsiPresent;
+wire menu_ramSoldered;
+
+mac_model mac_model_menu
+(
+	.model         ( status[3:1]       ),
+	.mem_big       ( 1'b0              ),
+	.configROMSize (                   ),
+	.scsiPresent   ( menu_scsiPresent  ),
+	.configRAMSize (                   ),
+	.machineType   (                   ),
+	.romSlot       (                   ),
+	.drive800k     (                   ),
+	.ramSoldered   ( menu_ramSoldered  )
+);
+
+// Bit set = item unavailable, which is what uppercase D reads as.
+assign status_menumask = {14'd0, menu_ramSoldered, ~menu_scsiPresent};
 			  
 //
 // Serial Ports
@@ -420,11 +430,8 @@ wire [15:0] ldr_int_wr_data, ldr_ext_wr_data;
 wire        dskLoadWrEn;
 wire        dskLoadSelExt;
 
-// floppy write-back (IWM write path -> SDRAM), same shared
-// extra-slot-3 port. Combined with the loader's own request below, since
-// addrController_top.v's arbiter is only
-// ever given ONE request/ack per side - loader and committer share that
-// one slot per side with the loader given fixed priority.
+// floppy write-back (IWM write path -> SDRAM) shares the extra-slot-3 port
+// with the loader, which has fixed priority
 wire [21:0] wc_int_wr_addr, wc_ext_wr_addr;
 wire        wc_int_wr_req,  wc_ext_wr_req;
 wire        wc_int_wr_ack,  wc_ext_wr_ack;
@@ -438,10 +445,7 @@ wire        wc_int_commit_buf_wr, wc_ext_commit_buf_wr;
 wire [7:0]  wc_int_commit_buf_addr, wc_ext_commit_buf_addr;
 wire [15:0] wc_int_commit_buf_data, wc_ext_commit_buf_data;
 
-// per-side combined (loader-or-committer) request presented to
-// addrController_top.v; loader wins whenever it is requesting, since a
-// mount and a write-commit contending for the same side is only possible
-// as a rare corner case, never a steady-state situation.
+// per-side combined loader-or-committer request; the loader has priority
 wire [21:0] slot3_int_addr = ldr_int_wr_req ? ldr_int_wr_addr : wc_int_wr_addr;
 wire        slot3_int_req  = ldr_int_wr_req | wc_int_wr_req;
 wire [15:0] slot3_int_data = ldr_int_wr_req ? ldr_int_wr_data : wc_int_wr_data;
@@ -475,15 +479,8 @@ always @(posedge clk_sys) begin
 end
 
 assign      _cpuVPA = (cpuFC == 3'b111) ? 1'b0 : ~(!_cpuAS && cpuAddr[23:21] == 3'b111);
-// SCSI back-pressure. Until now the SCSI space acknowledged unconditionally,
-// so a target that could not serve the next pseudo-DMA byte had no way to say
-// so and the transfer silently took stale data instead. It is the mechanism
-// behind the 2026-08-26 CD->disk
-// corruption. scsi_bus_hold is already qualified down to a DACK data access
-// that cannot be served (see ncr5380.sv), so this only ever stretches the
-// pseudo-DMA window; register reads, and every other device, are untouched.
-// Bounded by the target's ~516 ms io-stall watchdog, which aborts the command
-// and thereby releases the hold.
+// SCSI back-pressure: scsi_bus_hold stretches a pseudo-DMA access the target
+// cannot serve yet (see ncr5380.sv); bounded by the target's io-stall watchdog
 assign      _cpuDTACK = ~(!_cpuAS && cpuAddr[23:21] != 3'b111) | (status_turbo & !turbo_dtack_en) | scsi_bus_hold;
 
 wire        cpu_en_p      = status_turbo ? clk16_en_p : clk8_en_p;
@@ -615,7 +612,8 @@ addrController_top ac0
 	._cpuRW(_cpuRW),
 	._cpuAS(_cpuAS),
 	.turbo(status_turbo),
-	.configROMSize({status_mod,~status_mod}),
+	.configROMSize(configROMSize),
+	.scsiPresent(scsiPresent),
 	.configRAMSize(configRAMSize), 
 	.memoryAddr(memoryAddr),
 	.memoryLatch(memoryLatch),
@@ -672,7 +670,7 @@ dataController_top #(.SCSI_DEVS(SCSI_DEVS), .SCSI_CD_DEV(SCSI_CD_DEV)) dc0
 	.clk16_en_n(clk16_en_n),
 	.E_rising(E_rising),
 	.E_falling(E_falling),
-	.machineType(status_mod),
+	.machineType(machineType),
 	.turbo(status_turbo),
 	._systemReset(n_reset),
 	._cpuReset(_cpuReset), 
@@ -727,7 +725,11 @@ dataController_top #(.SCSI_DEVS(SCSI_DEVS), .SCSI_CD_DEV(SCSI_CD_DEV)) dc0
 
 	// floppy disk interface
 	.insertDisk({dsk_ext_ins, dsk_int_ins}),
-	.diskSides({dsk_ext_ds, dsk_int_ds}),
+	.img800k({dsk_ext_ds, dsk_int_ds}),
+	// the drive mechanism, from mac_model
+	.drive800k(drive800k),
+	// medium sidedness from each floppy_loader
+	.mediaSides({ldr_ext_media_ds, ldr_int_media_ds}),
 	.diskEject(diskEject),
 	.dskReadAddrInt(dskReadAddrInt),
 	.dskReadAckInt(dskReadAckInt),
@@ -772,27 +774,32 @@ dataController_top #(.SCSI_DEVS(SCSI_DEVS), .SCSI_CD_DEV(SCSI_CD_DEV)) dc0
 	.sd_buff_din(scsi_sd_buff_din),
 	.sd_buff_wr(sd_buff_wr),
 
-	// CD-DA pair. Summed into the Mac's audio by cd_mix above, NOT wired
-	// straight to AUDIO_L/R: that would half-wave clip every track against
-	// the +127 disabled-sound pedestal, which is why the DC blocker has to
-	// come first.
+	// CD-DA pair, summed into the Mac's audio by cd_mix above (DC-blocked first)
 	.cd_snd_l(cd_snd_l),
-	.cd_snd_r(cd_snd_r)
+	.cd_snd_r(cd_snd_r),
+
+	// block device interface for the HD20 (slot 5)
+	.dcd_sd_lba(dcd_sd_lba),
+	.dcd_sd_rd(dcd_sd_rd),
+	.dcd_sd_wr(dcd_sd_wr),
+	.dcd_sd_ack(sd_ack[5]),
+	.dcd_sd_buff_addr(sd_buff_addr[7:0]),
+	.dcd_sd_buff_dout(sd_buff_dout),
+	.dcd_sd_buff_din(dcd_sd_buff_din),
+	.dcd_sd_buff_wr(sd_buff_wr),
+	.dcd_img_mounted(img_mounted[5]),
+	.dcd_img_size(img_size),
+	.dcd_img_readonly(img_readonly)
 );
 
-// sd_rd/sd_wr are consumer OUTPUTS -> hps_io INPUTS, so the SCSI 2-bit view
-// above, each floppy_loader's own scalar sd_rd request, and each
-// floppy_sd_writer's own scalar sd_wr request must be combined
-// into the full VDNUM=4 vectors here.
+// sd_rd/sd_wr are consumer outputs -> hps_io inputs; the SCSI, floppy and
+// HD20 requests are combined into the full VDNUM vectors here.
 wire ldr_int_sd_rd, ldr_ext_sd_rd;
 wire wr_int_sd_wr,  wr_ext_sd_wr;
-assign sd_rd = {scsi_sd_rd[SCSI_CD_DEV], ldr_ext_sd_rd, ldr_int_sd_rd, scsi_sd_rd[1:0]};
-assign sd_wr = {scsi_sd_wr[SCSI_CD_DEV], wr_ext_sd_wr, wr_int_sd_wr, scsi_sd_wr[1:0]};
+assign sd_rd = {dcd_sd_rd, scsi_sd_rd[SCSI_CD_DEV], ldr_ext_sd_rd, ldr_int_sd_rd, scsi_sd_rd[1:0]};
+assign sd_wr = {dcd_sd_wr, scsi_sd_wr[SCSI_CD_DEV], wr_ext_sd_wr, wr_int_sd_wr, scsi_sd_wr[1:0]};
 
-// sd_lba is likewise shared per slot between the loader (valid while it is
-// busy) and the writer (valid the rest of the time) - the writer itself
-// never starts while loader_busy is asserted (see floppy_sd_writer.v), so
-// this mux can never straddle a genuine simultaneous request.
+// sd_lba is shared per slot: the loader's while it is busy, else the writer's
 wire [31:0] ldr_int_sd_lba, ldr_ext_sd_lba;
 wire [31:0] wr_int_sd_lba, wr_ext_sd_lba;
 assign sd_lba[2] = ldr_int_busy ? ldr_int_sd_lba : wr_int_sd_lba;
@@ -802,16 +809,14 @@ wire [15:0] wr_int_sd_buff_din, wr_ext_sd_buff_din;
 assign sd_buff_din[2] = wr_int_sd_buff_din;
 assign sd_buff_din[3] = wr_ext_sd_buff_din;
 
-// wr_*_busy: queued-or-in-flight sd_wr against this slot (see
-// floppy_sd_writer.v) - folded into LED_USER below alongside the loader's
-// own busy, so the activity light also covers a pending SD flush after a
-// write, not just a mount-time load.
+// wr_*_busy: a queued or in-flight sd_wr, folded into LED_USER below
 wire wr_int_busy, wr_ext_busy;
 
 wire        ldr_int_done, ldr_ext_done;
 wire        ldr_int_busy, ldr_ext_busy;
 wire [63:0] ldr_int_size, ldr_ext_size;
 wire        ldr_int_readonly, ldr_ext_readonly;
+wire        ldr_int_media_ds, ldr_ext_media_ds;
 
 floppy_loader ldr_int
 (
@@ -838,6 +843,7 @@ floppy_loader ldr_int
 	.done(ldr_int_done),
 	.loaded_size(ldr_int_size),
 	.readonly_latched(ldr_int_readonly),
+	.media_ds(ldr_int_media_ds),
 	.busy(ldr_int_busy)
 );
 
@@ -866,6 +872,7 @@ floppy_loader ldr_ext
 	.done(ldr_ext_done),
 	.loaded_size(ldr_ext_size),
 	.readonly_latched(ldr_ext_readonly),
+	.media_ds(ldr_ext_media_ds),
 	.busy(ldr_ext_busy)
 );
 
@@ -884,9 +891,7 @@ floppy_sd_writer wr_int
 
 	.readonly(ldr_int_readonly),
 	.loader_busy(ldr_int_busy),
-	// image length in 512-byte blocks; only 400K/800K images ever reach
-	// insertDisk (see dsk_int_ss/ds below), so 13 bits covers every case
-	// that can produce a commit - 1600 blocks for an 800K image.
+	// image length in 512-byte blocks (1600 for an 800K image)
 	.size_blocks(ldr_int_size[21:9]),
 
 	.sd_lba(wr_int_sd_lba),
@@ -926,15 +931,8 @@ floppy_sd_writer wr_ext
 	.busy(wr_ext_busy)
 );
 
-// word written into SDRAM this cycle when dskLoadWrEn is high - selects
-// whichever side (int/ext) addrController_top's arbiter (fixed priority
-// int-over-ext) actually granted this cycle, and within that side,
-// whichever source (loader/committer) slot3_int_req/slot3_ext_req above
-// selected. Must use dskLoadSelExt (held for the whole grant cycle), not
-// ldr_ext_wr_ack/dskLoadAckExt - that ack is a late pulse in busPhase 3,
-// one phase after sdram.v's CAS phase (busPhase 1) already latched this
-// data, so gating on it left every ext (drive 2) write writing int's
-// stale data instead of its own.
+// word written into SDRAM when dskLoadWrEn is high; dskLoadSelExt is held
+// for the whole grant cycle, the ack pulse comes too late for CAS
 wire [15:0] slot3_wr_data = dskLoadSelExt ? slot3_ext_data : slot3_int_data;
 
 reg disk_act;
@@ -958,23 +956,20 @@ wire dio_download;
 wire [23:0] dio_addr = ioctl_addr[24:1];
 wire  [7:0] dio_index;
 
+// word address within the ROM region: slot number, then word offset
+wire [20:0] dio_rom_addr  = {1'b0, dio_index[7:6], dio_addr[17:0]};
+wire [20:0] rom_read_addr = {1'b0, romSlot,        memoryAddr[18:1]};
+
 // good floppy image sizes are 819200 bytes and 409600 bytes
-reg dsk_int_ds, dsk_ext_ds;  // double sided image inserted
-reg dsk_int_ss, dsk_ext_ss;  // single sided image inserted
+reg dsk_int_ds, dsk_ext_ds;  // 819,200-byte image inserted
+reg dsk_int_ss, dsk_ext_ss;  // 409,600-byte image inserted
 
 // any known type of disk image inserted?
 wire dsk_int_ins = dsk_int_ds || dsk_int_ss;
 wire dsk_ext_ins = dsk_ext_ds || dsk_ext_ss;
 
-// Floppies are S-type block-device mounts, loaded into SDRAM
-// by floppy_loader (see instantiation above) instead of streamed in via
-// ioctl_download. insertDisk therefore only goes true once ldr_*_done
-// fires - i.e. once the WHOLE image is resident in SDRAM - never at the
-// bare img_mounted pulse, so the Mac can never observe a partially-loaded
-// disk. Also clear-on-mount (not just on eject/size-mismatch): a remount
-// while already inserted must drop insertDisk immediately so nothing reads
-// mid-reload, mirroring the SAVE-feature precedent in the UK101 core.
-// diskEject is still set by macOS on eject, unchanged.
+// insertDisk goes true only once ldr_*_done fires (the whole image is in
+// SDRAM) and drops on a remount, so nothing reads mid-reload
 always @(posedge clk_sys) begin
 	if (img_mounted[2] && img_size != 0) begin
 		dsk_int_ds <= 1'b0;
@@ -1007,9 +1002,7 @@ always @(posedge clk_sys) begin
 	end
 end
 
-// ROM is being stored at word offset 0x00000/0x40000 (normal/alt, bit6-selected).
-// Floppy images no longer come through here - see the
-// floppy_loader instances above.
+// ROM slots are 512KB apart in the ROM region (rtl/sdram_map.vh)
 reg [20:0] dio_a;
 reg [15:0] dio_data;
 reg        dio_write;
@@ -1019,7 +1012,7 @@ always @(posedge clk_sys) begin
 
 	if(ioctl_write) begin
 		dio_data <= {ioctl_data[7:0], ioctl_data[15:8]};
-		dio_a <= {dio_index[6], dio_addr[17:0]};
+		dio_a <= dio_rom_addr;
 		ioctl_wait <= 1;
 	end
 
@@ -1034,9 +1027,13 @@ wire download_cycle = dio_download && dioBusControl;
 
 ////////////////////////// SDRAM /////////////////////////////////
 
-wire [24:0] sdram_addr = download_cycle ? {4'b0001, dio_a[20:0] } :
-                         ~_romOE        ? {4'b0001, 2'b00, status_mod, memoryAddr[18:1]} :
-                                          {3'b000, (dskReadAckInt || dskReadAckExt || dskLoadWrEn), memoryAddr[21:1]};
+// region bases from rtl/sdram_map.vh
+wire dsk_cycle = dskReadAckInt || dskReadAckExt || dskLoadWrEn;
+
+wire [24:0] sdram_addr = download_cycle ? (`SDRAM_ROM_BASE  + dio_a[20:0])       :
+                         ~_romOE        ? (`SDRAM_ROM_BASE  + rom_read_addr)     :
+                         dsk_cycle      ? (`SDRAM_DISK_BASE + memoryAddr[21:1])  :
+                                          (`SDRAM_RAM_BASE  + memoryAddr[21:1]);
 
 wire [15:0] sdram_din  = download_cycle ? dio_data  : dskLoadWrEn ? slot3_wr_data : memoryDataOut;
 wire  [1:0] sdram_ds   = download_cycle ? 2'b11     : dskLoadWrEn ? 2'b11          : { !_memoryUDS, !_memoryLDS };
@@ -1070,7 +1067,7 @@ sdram sdram
 	.sd_cas         ( SDRAM_nCAS               ),
 
 	// cpu/chipset interface
-	// map rom to sdram word address $200000 - $20ffff
+	// Region layout is rtl/sdram_map.vh; boot ROMs live at word $400000.
 	.din            ( sdram_din                ),
 	.addr           ( sdram_addr               ),
 	.ds             ( sdram_ds                 ),

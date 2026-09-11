@@ -1,55 +1,21 @@
 /*
  floppy_track_decoder.v
 
- Decode a raw GCR data field (the same
- stream floppy_track_encoder.v produces for STATE_DHDR onward) back into
- 512 bytes of sector payload, verifying it end to end before it is ever
- handed to a caller.
+ Decode a raw GCR data field (as floppy_track_encoder.v produces from
+ STATE_DHDR on) back into 512 bytes of sector payload, verified end to end.
+ One raw byte per `ready` pulse. Scans for D5 AA AD, takes the sector
+ number, de-nibblizes the 524-byte tag+data payload while running the
+ C1/C2/C3 checksum chain, drops the 12 tag bytes, checks the checksum and
+ the DE AA trailer. `sector_valid` pulses only when every check passed;
+ any failure pulses `reject` and returns to scanning.
 
- Consumes one raw disk byte per `ready` pulse (mirrors floppy_track_encoder.v's
- own pacing convention).
- Scans continuously for the D5 AA AD data-field marker (ignoring everything
- else, including the address field's D5 AA 96, whose differing third byte
- never matches), decodes the sector number, then de-nibblizes the whole
- 524-byte continuous payload (12-byte Sony tag + 512-byte sector data, one
- unbroken 6:2 group stream per real Apple GCR format - the 12 tag bytes are
- genuine data written by the Mac, NOT a literal sync run, despite this
- core's own read-side encoder faking an all-zero tag as one) back to 524
- bytes while running the C1/C2/C3
- checksum chain in reverse across all of it, discards the first 12
- recovered bytes (the tag - this core has nowhere to expose it) keeping
- only the 512 sector-data bytes, verifies the recovered checksum against
- the trailing 4-byte checksum field, and verifies the DE AA trailer. `sector_valid`
- pulses for exactly one clk if and only if every one of those checks
- passed - never for a partial, corrupt, or truncated field. Any failure
- (bad encoding, checksum mismatch, bad trailer) instead
- pulses `reject` and returns to scanning; a field that simply stops
- arriving (truncation) just leaves the decoder waiting, which is the
- correct behaviour - there is no code path that can assert sector_valid
- without having verified the whole field.
+ Address fields (D5 AA 96) in the write stream are reported (amark, with the
+ sector) and their format byte after the checksum (fmt_mark/fmt_ds).
 
- The nibble-recovery arithmetic below is a direct RTL port of the reference
- decoder proved out against this project's
- own RTL encoder dumps: group g's four raw bytes recover group g's own
- three payload bytes directly (payload bytes 3g..3g+2) - there is no
- lookback and no discarded group. (An earlier reading of the reference
- decoder's docstring claimed a one-group lookback with group 0 thrown
- away; that was a misreading of why the original 512-byte-only decode
- happened to come out right - re-derived and empirically confirmed
- against the real, unmodified floppy_track_encoder.v's output during
- the tag fix: decoding its whole 699-byte DZRO+DPRE+DATA region this
- way, with no group discarded, recovers exactly the 12 zero tag bytes
- followed by the real 512-byte sector data, byte-for-byte, using
- precisely the bytes the encoder emits - no invented extra warmup
- group needed.)
- The forward/reverse GCR table below was generated mechanically from
- floppy_track_encoder.v's own table, never hand-transcribed, so it cannot
- silently diverge from what the encoder actually produces.
-
- The soff/spt geometry math is copied verbatim from floppy_track_encoder.v
- (same track/side/sides inputs) so `addr` lands on exactly the SDRAM byte
- offset the encoder would have read this sector's byte 0 from.
-*/
+ The reverse GCR table is generated from floppy_track_encoder.v's table, and
+ the soff/spt geometry is the encoder's, so `addr` is the offset the encoder
+ would read this sector from.
+ */
 
 /* verilator lint_off UNUSED */
 /* verilator lint_off CASEINCOMPLETE */
@@ -65,8 +31,7 @@ module floppy_track_decoder (
 
    input      [7:0]  idata,   // raw byte from the write stream
 
-   // pulses for exactly one clk when a full sector has been decoded and
-   // verified - the only time sector/addr/buf_* are meaningful.
+   // pulses for one clk when a sector has been decoded and verified
    output reg        sector_valid,
    output reg [3:0]  sector,     // decoded sector number, valid with sector_valid
    output reg [21:0] addr,       // SDRAM byte offset of this sector's byte 0
@@ -74,32 +39,21 @@ module floppy_track_decoder (
    // pulses for exactly one clk whenever a field is abandoned
    output reg        reject,
 
-   // recovered 512-byte payload from the most recently completed sector,
-   // registered (1-clk-latency) read port - buf_data reflects buf_addr as
-   // it stood one cycle earlier, the standard inferrable-block-RAM idiom
-   // (matches floppy_loader.v's buf_rd). An earlier combinational-read
-   // version of this port elaborated correctly but could not map to a
-   // Cyclone V M10K at all (no combinational read mode), so Quartus built
-   // it out of plain registers plus a 512:1 mux - roughly 6,500 ALMs per
-   // drive instance, found only once this module was actually synthesized
-   // for hardware (it was sim-only before that).
-   //
-   // The write side had the same problem for a different reason: a group
-   // completion could write up to three different buf_mem addresses
-   // (buf_mem[buf_idx0]/[buf_idx1]/[buf_idx2]) on the same clock edge, and
-   // no Cyclone V memory primitive offers three write ports, so Quartus
-   // silently fell back to registers there too (no diagnostic - inference
-   // just never triggered). Fixed by latching the up-to-three pending
-   // writes when a group completes (state S_GRPC below) and draining them
-   // one per cycle, so buf_mem's write side is now a single always-block
-   // driving at most one address per edge - the idiom Quartus requires.
+   // address field sector number seen in the write stream (a format)
+   output reg        amark,
+   output reg [3:0]  amark_sector,
+
+   // address field checksum verified; fmt_ds = format byte bit 5
+   output reg        fmt_mark,
+   output reg        fmt_ds,
+
+   // recovered 512-byte payload of the last completed sector; registered
+   // read port (buf_data follows buf_addr by one clock)
    input      [8:0]  buf_addr,
    output reg [7:0]  buf_data
 );
 
-   // ------------------------------------------------------------------
-   // geometry: soff/spt, copied verbatim from floppy_track_encoder.v
-   // ------------------------------------------------------------------
+   // geometry: soff/spt as in floppy_track_encoder.v
    wire [3:0] spt =
       (track[6:4] == 3'd0)?4'd12:
       (track[6:4] == 3'd1)?4'd11:
@@ -122,31 +76,15 @@ module floppy_track_decoder (
       (trackm1[6:4] == 3'd3)?(track_times_9 + 10'd48 + 10'd32 + 10'd16):
       (track_times_8 + 10'd64 + 10'd48 + 10'd32 + 10'd16);
 
-   // Track/side part of the sector address. Deliberately does NOT include
-   // the sector term: the whole address is LATCHED in S_SECT (addr_latched
-   // below), at the same instant the bounds check passes, and the latched
-   // value is what S_DTRL finally publishes ~11ms later.
-   //
-   // Evaluating this live at S_DTRL instead would separate the check from
-   // the thing it protects by a whole field (699 payload bytes at 16us
-   // each). track/side/sides are live inputs over that window - driveSide
-   // in particular is driven straight off the CA lines with no read strobe
-   // (see floppy.v's own "we don't know if this is a true read" comment),
-   // so a side flip mid-field could add the `spt*512` term to a field that
-   // was validated as side 0 on a single-sided mount, landing the sector
-   // up to 6144 bytes away from where it belongs - past the end of a 400K
-   // image on the outer tracks. Latching makes validate-and-commit atomic.
+   // track/side part of the address; the whole address is latched in S_SECT
+   // so a side flip mid-field cannot move a validated sector
    wire [21:0] geom_base =
       { 3'b00, soff, 9'd0 } +
       (sides ? { 3'b00, soff, 9'd0 } : 22'd0) +
       (side  ? { 9'd0, spt, 9'd0 }   : 22'd0);
 
-   // ------------------------------------------------------------------
-   // reverse GCR table: disk byte -> 6-bit nibble, or invalid.
-   // Generated mechanically from floppy_track_encoder.v's own table - do
-   // not hand-edit; regenerate if the encoder's table ever
-   // changes.
-   // ------------------------------------------------------------------
+   // reverse GCR table: disk byte -> 6-bit nibble, or invalid (generated from
+   // floppy_track_encoder.v's table)
    function [6:0] rev_lookup; // {valid, nib[5:0]}
       input [7:0] b;
       reg [5:0] nib;
@@ -180,23 +118,20 @@ module floppy_track_decoder (
    wire       nib_valid = rl[6];
    wire [5:0] nib_cur    = rl[5:0];
 
-   // ------------------------------------------------------------------
    // state machine
-   // ------------------------------------------------------------------
    localparam S_SCAN = 3'd0;  // hunting for D5 AA AD
    localparam S_SECT = 3'd1;  // 1 byte: sector number
    localparam S_GRPC = 3'd2;  // draining up to 3 pending buf_mem writes
-                               // from the group that just completed, one
-                               // write per cycle - not gated on `ready`
-   localparam S_GRP  = 3'd3;  // 699 bytes across 175 groups (last partial):
-                               // recovers the 524-byte tag(12)+data(512)
-                               // continuous payload directly, group g ->
-                               // payload bytes 3g..3g+2, no lookback
+   localparam S_GRP  = 3'd3;  // 699 bytes in 175 groups: the 524-byte tag+data payload
    localparam S_DSUM = 3'd4;  // 4 bytes: checksum
    localparam S_DTRL = 3'd5;  // 2 bytes: DE AA trailer
+   localparam S_AMRK = 3'd6;  // the 5 bytes after D5 AA 96: t s h f c
 
    reg [2:0]  state;
    reg [23:0] hist;
+   reg [2:0]  am_idx;
+   reg [5:0]  am_t, am_s, am_h, am_f;
+   reg        am_ok;   // every byte of this field so far was valid GCR
 
    reg [3:0]  sector_reg;
    reg [21:0] addr_latched; // geom_base + sector term, captured in S_SECT
@@ -213,8 +148,7 @@ module floppy_track_decoder (
 
    reg        dtrl_idx;
 
-   // pending buf_mem writes latched at group completion, drained one per
-   // cycle in S_GRPC - see the buf_mem port comment above.
+   // pending buf_mem writes, drained one per cycle in S_GRPC
    reg [1:0]  commit_step;             // 0,1,2: which of the 3 slots is next
    reg        commit_v0, commit_v1, commit_v2;
    reg [8:0]  commit_a0, commit_a1, commit_a2;
@@ -250,10 +184,8 @@ module floppy_track_decoder (
    wire [7:0] nib_in_3  = nib_xor_2 ^ new_c2;
    wire [7:0] new_c1_full = rol_c1 + nib_in_3 + {7'd0, new_c2x};
 
-   // buf_mem write indices: recovered_count runs 0..523 across the whole
-   // tag+data payload (needs the full 10 bits - it exceeds 511), so the
-   // "-12" (drop the tag) has to happen before truncating to the 9-bit
-   // buf_mem address, not after.
+   // recovered_count runs 0..523 over tag+data; the 12 tag bytes are dropped
+   // before truncating to the 9-bit buf_mem address
    wire [9:0] buf_idx0 = recovered_count - 10'd12;
    wire [9:0] buf_idx1 = recovered_count + 10'd1 - 10'd12;
    wire [9:0] buf_idx2 = recovered_count + 10'd2 - 10'd12;
@@ -268,15 +200,7 @@ module floppy_track_decoder (
       end
    endtask
 
-   // Synchronous reset, matching floppy_write_committer.v (the other
-   // consumer of floppy.v's identical `!_reset || writePathReset` wire, and
-   // synchronous there too). writePathReset is a DERIVED
-   // combinational pulse, not a true reset rail, so it must not sit on an
-   // asynchronous reset pin: a glitch of any width on that AND-tree would
-   // abandon the field in progress, and since the write path reports no
-   // error for an abandoned field, the Mac would believe a sector it wrote
-   // had landed when it never did. clk is free-running, so nothing is lost
-   // by waiting for the edge.
+   // synchronous reset: writePathReset is a derived pulse, not a reset rail
    always @(posedge clk) begin
       if (rst) begin
          state        <= S_SCAN;
@@ -285,18 +209,19 @@ module floppy_track_decoder (
          reject       <= 1'b0;
          sector       <= 4'd0;
          addr         <= 22'd0;
+         amark        <= 1'b0;
+         amark_sector <= 4'd0;
+         fmt_mark     <= 1'b0;
+         fmt_ds       <= 1'b0;
       end else begin
          sector_valid <= 1'b0;
          reject       <= 1'b0;
+         amark        <= 1'b0;
+         fmt_mark     <= 1'b0;
 
          if (state == S_GRPC) begin
-            // Drain the up-to-3 pending buf_mem writes latched when the
-            // group completed, one write per cycle, never more - so
-            // buf_mem has a single write port and can map to a Cyclone V
-            // M10K. Not gated on `ready`: `ready` pulses roughly once per
-            // 128 clk8 cycles (one incoming disk byte / 16us, see the
-            // module header comment) and this drain is a fixed 3 cycles,
-            // so no incoming byte can arrive mid-drain.
+             // drain the pending buf_mem writes, one per cycle; no byte can arrive
+             // mid-drain (ready pulses every 128 clk8)
             case (commit_step)
             2'd0: begin
                if (commit_v0) buf_mem[commit_a0] <= commit_d0;
@@ -320,27 +245,51 @@ module floppy_track_decoder (
                hist <= {hist[15:0], idata};
                if ({hist[15:0], idata} == 24'hD5AAAD)
                   state <= S_SECT;
+               else if ({hist[15:0], idata} == 24'hD5AA96) begin
+                  state  <= S_AMRK;
+                  am_idx <= 3'd0;
+                  am_ok  <= 1'b1;
+               end
+            end
+
+            S_AMRK: begin
+               // D5 AA 96 t s h f c: sector reported as it goes by, format byte after the checksum
+               if (!nib_valid) am_ok <= 1'b0;
+
+               case (am_idx)
+               3'd0: am_t <= nib_cur;
+               3'd1: begin
+                  am_s <= nib_cur;
+                  if (nib_valid && nib_cur < {2'b00, spt}) begin
+                     amark        <= 1'b1;
+                     amark_sector <= nib_cur[3:0];
+                  end
+               end
+               3'd2: am_h <= nib_cur;
+               3'd3: am_f <= nib_cur;
+               default: begin
+                  // c: the field's checksum over t s h f
+                  if (am_ok && nib_valid &&
+                      (am_t ^ am_s ^ am_h ^ am_f) == nib_cur) begin
+                     fmt_mark <= 1'b1;
+                     fmt_ds   <= am_f[5];
+                  end
+                  state <= S_SCAN;
+                  hist  <= 24'd0;
+               end
+               endcase
+
+               if (am_idx != 3'd4) am_idx <= am_idx + 3'd1;
             end
 
             S_SECT: begin
-               // Reject before committing to a sector number the checksum
-               // chain never covers (it starts at zero right after this
-               // byte - see the module header). Two failure modes close
-               // here: a mis-synced field aliasing to a sector index past
-               // this track's real spt (nib_cur is the full 6-bit nibble,
-               // not the truncated 4 bits sector_reg keeps - an alias a
-               // 4-bit compare would miss), and a side-1 field landing on
-               // a single-sided (sides==0) mount, where geom_base above
-               // would otherwise still add the side offset and write
-               // outside the image.
+                // reject a sector index past this track's spt, or a side-1 field on a
+                // single-sided mount
                if (!nib_valid) do_reject;
                else if (nib_cur >= spt || (side && !sides)) do_reject;
                else begin
                   sector_reg      <= nib_cur[3:0];
-                  // Capture the full address NOW, while the geometry that
-                  // was just bounds-checked is still the live geometry.
-                  // Uses nib_cur directly, not sector_reg - that register
-                  // is being assigned on this same edge.
+                   // capture the full address now, from nib_cur (sector_reg is being assigned)
                   addr_latched    <= geom_base + { 9'd0, nib_cur[3:0], 9'd0 };
                   state           <= S_GRP;
                   group_index     <= 8'd0;
@@ -362,16 +311,8 @@ module floppy_track_decoder (
                   end
 
                   if (grp_done) begin
-                     // groups 0..174 recover the full 524-byte tag+data
-                     // payload directly (group g -> payload bytes 3g..3g+2,
-                     // no lookback/discard - see header comment) -
-                     // bytes 0..11 are the Sony tag, which this core has
-                     // nowhere to expose, so only bytes 12..523
-                     // (recovered_count-12, i.e. buf index 0..511) are
-                     // actually committed to buf_mem. Latch the (up to 3)
-                     // pending writes and hand off to S_GRPC to drain them
-                     // one per cycle instead of writing buf_mem directly
-                     // here - see the buf_mem port comment above.
+                      // groups 0..174 recover the 524-byte tag+data payload; bytes 12..523
+                      // are committed to buf_mem via S_GRPC
                      commit_v0 <= (recovered_count >= 10'd12);
                      commit_v1 <= (recovered_count + 10'd1 >= 10'd12);
                      commit_v2 <= has_s3 && (recovered_count + 10'd2 >= 10'd12);

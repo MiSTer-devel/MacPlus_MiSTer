@@ -1,7 +1,12 @@
-/* 
+/*
  floppy_track_encoder.v
- 
+
  encode a full floppy track from raw sector data on the fly
+
+ The format relay (wr_* below): a format expects the next address field
+ after the write to be sector 0, so the decoder reports the first address
+ field written (wr_mark) and the layout restarts there, relay_ahead bytes
+ of sync later, when the write ends (wr_end).
 
  */
 
@@ -21,8 +26,14 @@ module floppy_track_encoder (
 
 	output reg [21:0] 	addr,   // address to fetch from
    input [7:0] 	idata,
-			     
-   output [7:0] 	odata 
+
+   output [7:0] 	odata,
+
+   // format relay: the write stream as the media saw it (see the header)
+   input             wr_byte,        // pulse: a byte has been laid on the media
+   input             wr_mark,        // pulse: that byte was an address field's sector number
+   input      [3:0]  wr_mark_sector, //   ... and this is the sector, valid with wr_mark
+   input             wr_end          // pulse: the write is over, the head is reading again
 );
 
 always @(posedge clk) begin
@@ -138,7 +149,43 @@ end
    localparam STATE_DATA = 4'd6;      // the payload itself
    localparam STATE_DSUM = 4'd7;      // 4 bytes data checksum
    localparam STATE_DTRL = 4'd8;      // 3 bytes data block trailer
+   localparam STATE_GAP  = 4'd9;      // relay: gap_cnt sync bytes, then the address block
    localparam STATE_WAIT = 4'd15;     // wait until start of next sector
+
+   // format relay: 782 bytes per sector as laid out here
+   localparam [13:0] SECTOR_BYTES = 14'd782;
+   wire [13:0] rev_len =
+	      (track[6:4] == 3'd0)?(14'd12 * SECTOR_BYTES):
+	      (track[6:4] == 3'd1)?(14'd11 * SECTOR_BYTES):
+	      (track[6:4] == 3'd2)?(14'd10 * SECTOR_BYTES):
+	      (track[6:4] == 3'd3)?(14'd9  * SECTOR_BYTES):
+	                           (14'd8  * SECTOR_BYTES);
+
+   reg         relay_armed;
+   reg  [3:0]  relay_sector;
+   reg  [13:0] relay_ahead;   // bytes from the head round to the armed mark's D5
+   reg  [13:0] gap_cnt;       // STATE_GAP: sync bytes still to emit
+
+   wire relay = wr_end && relay_armed;
+
+   always @(posedge clk or posedge rst) begin
+      if (rst) begin
+         relay_armed  <= 1'b0;
+         relay_sector <= 4'd0;
+         relay_ahead  <= 14'd0;
+      end else begin
+         if (wr_byte && relay_armed)
+            relay_ahead <= (relay_ahead == 14'd0) ? rev_len - 14'd1 : relay_ahead - 14'd1;
+         if (wr_mark && !relay_armed) begin
+            // the sector byte is five bytes behind the D5
+            relay_armed  <= 1'b1;
+            relay_sector <= wr_mark_sector;
+            relay_ahead  <= rev_len - 14'd5;
+         end
+         if (wr_end)
+            relay_armed <= 1'b0;
+      end
+   end
 
    // output data during address block
    wire [7:0] odata_addr =
@@ -264,13 +311,30 @@ always @(posedge clk or posedge rst) begin
 		state <= STATE_SYN0;
 		sector <= 4'd0;
 	   src_offset <= 9'd0;
+		gap_cnt <= 14'd0;
+	end else if(relay) begin
+		// pick the layout up relay_ahead bytes short of the written mark
+		state <= STATE_GAP;
+		gap_cnt <= relay_ahead;
+		count <= 10'd0;
+		sector <= relay_sector;
+		src_offset <= 9'd0;
 	end else if(ready) begin
 		count <= count + 10'd1;
-	 
+
 	   if(strobe)
 			src_offset <= src_offset + 9'd1;
-	   
+
 		case(state)
+
+			// relay: sync until the written mark is due, then its address block
+			STATE_GAP: begin
+				if(gap_cnt <= 14'd1) begin
+					state <= STATE_ADDR;
+					count <= 10'd0;
+				end else
+					gap_cnt <= gap_cnt - 14'd1;
+			end
 
 			// send 14*4=56 sync bytes
 			STATE_SYN0: begin

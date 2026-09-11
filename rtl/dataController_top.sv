@@ -81,7 +81,9 @@ module dataController_top(
 	// misc
 	output memoryOverlayOn,
 	input [1:0] insertDisk,
-	input [1:0] diskSides,
+	input [1:0] img800k,    // mounted file is 819,200 bytes: see floppy.v's port comment
+	input drive800k,        // drive mechanism: see floppy.v's port comment
+	input [1:0] mediaSides, // what the medium said at mount: see floppy.v
 	output [1:0] diskEject,
 	output [1:0] diskMotor,
 	output [1:0] diskAct,
@@ -127,7 +129,20 @@ module dataController_top(
 	input             [4:0] sd_buff_addr_hi,  // hps_io addr[12:8], CD-DA frames
 	input            [15:0] sd_buff_dout,
 	output           [15:0] sd_buff_din[SCSI_DEVS],
-	input                   sd_buff_wr
+	input                   sd_buff_wr,
+
+	// DCD (Apple HD20) on the external drive port: its own hps_io slot
+	output           [31:0] dcd_sd_lba,
+	output                  dcd_sd_rd,
+	output                  dcd_sd_wr,
+	input                   dcd_sd_ack,
+	input             [7:0] dcd_sd_buff_addr,
+	input            [15:0] dcd_sd_buff_dout,
+	output           [15:0] dcd_sd_buff_din,
+	input                   dcd_sd_buff_wr,
+	input                   dcd_img_mounted,
+	input            [63:0] dcd_img_size,
+	input                   dcd_img_readonly
 );
 	
 	parameter SCSI_DEVS = 2;
@@ -143,6 +158,16 @@ module dataController_top(
 	reg loadSoundD;
 	always @(posedge clk32)
 		if (clk8_en_n) loadSoundD <= loadSound;
+
+	// spindle duty for a 400K drive; see rtl/disk_pwm_duty.v
+	wire [8:0] disk_pwm;
+	disk_pwm_duty disk_pwm_duty_inst
+	(
+		.clk        ( clk32 ),
+		.sample_en  ( clk8_en_p && loadSoundD ),
+		.sample     ( memoryDataIn[5:0] ),
+		.duty_index ( disk_pwm )
+	);
 
 	// Pre-latch audio scheme:
 	// The SDRAM reads audioAddr at sndReadAck rate (every 16 clk8), but the
@@ -489,7 +514,10 @@ module dataController_top(
 		.driveSel(driveSel),
 		.dataOut(iwmDataOut),
 		.insertDisk(insertDisk),
-		.diskSides(diskSides),
+		.img800k(img800k),
+		.drive800k(drive800k),
+		.mediaSides(mediaSides),
+		.disk_pwm(disk_pwm),
 		.diskEject(diskEject),
 		.diskMotor(diskMotor),
 		.diskAct(diskAct),
@@ -519,7 +547,19 @@ module dataController_top(
 		.dskCommitAddrExt(dskCommitAddrExt),
 		.dskCommitBufWrExt(dskCommitBufWrExt),
 		.dskCommitBufAddrExt(dskCommitBufAddrExt),
-		.dskCommitBufDataExt(dskCommitBufDataExt)
+		.dskCommitBufDataExt(dskCommitBufDataExt),
+
+		.dcd_sd_lba(dcd_sd_lba),
+		.dcd_sd_rd(dcd_sd_rd),
+		.dcd_sd_wr(dcd_sd_wr),
+		.dcd_sd_ack(dcd_sd_ack),
+		.dcd_sd_buff_addr(dcd_sd_buff_addr),
+		.dcd_sd_buff_dout(dcd_sd_buff_dout),
+		.dcd_sd_buff_din(dcd_sd_buff_din),
+		.dcd_sd_buff_wr(dcd_sd_buff_wr),
+		.dcd_img_mounted(dcd_img_mounted),
+		.dcd_img_size(dcd_img_size),
+		.dcd_img_readonly(dcd_img_readonly)
 	);
 
 	// SCC

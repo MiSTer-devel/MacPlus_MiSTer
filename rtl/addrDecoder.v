@@ -81,6 +81,8 @@
 
 module addrDecoder(
 	input [1:0] configROMSize,
+	// 1 = this machine has a SCSI bus (rtl/mac_model.v).
+	input scsiPresent,
 	input [23:0] address,
 	input _cpuAS,
 	input memoryOverlayOn,
@@ -116,12 +118,13 @@ module addrDecoder(
 				end
 			end
 			4'b0100: begin //40 0000 - 4F FFFF
-				if(configROMSize[1] || address[17] == 1'b0)   // <- this detects SCSI (on Plus)!!!
+				// no SCSI: ROM mirrors at A17 = 1, which is what the Plus ROM tests
+				if(configROMSize[1] || address[17] == 1'b0 || !scsiPresent)
 					selectROM = !_cpuAS;
 				selectSEOverlay = !_cpuAS;
 			end
 			4'b0101: begin //50 000 - 5F FFFF
-				if (address[19]) // 58 000 - 5F FFFF
+				if (address[19] && scsiPresent) // 58 000 - 5F FFFF
 					selectSCSI = !_cpuAS;
 				selectSEOverlay = !_cpuAS;
 			end

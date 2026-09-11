@@ -1,24 +1,8 @@
-// Mount-time floppy image loader.
-//
-// Floppies were previously a one-way ioctl_download blob into SDRAM. This
-// module replaces that with a real SD
-// block-device mount: on img_mounted it streams the whole image in via
-// sd_rd, sector by sector, into the SAME SDRAM byte offsets the read side
-// (dskReadAddrInt/Ext in addrController_top.v) already expects, so nothing
-// downstream of SDRAM changes. Still read-only - no sd_wr, no write-back.
-//
-// Each sector is staged into a small local BRAM as it streams in (sd_buff_wr
-// has no rate limit against on-chip RAM), then drained out to SDRAM one word
-// at a time through the shared extra-slot-3 port in addrController_top.v -
-// that slot recurs roughly every 2us, so draining is the slow half of a
-// mount (a 1600-sector 800K image takes on the order of a second). Load-
-// then-drain per sector, not double-buffered - correctness first; the gate
-// here is booting exactly as before, not load speed.
-//
-// `done` (and therefore the caller's insertDisk latch) does not fire until
-// the whole image is resident, so the Mac can never observe a disk that is
-// only partially loaded - the SD-mount equivalent of the end-of-download
-// latch the old ioctl_download path used.
+// Mount-time floppy image loader: on img_mounted the whole image is streamed
+// in via sd_rd, sector by sector, to the SDRAM offsets the read side expects
+// (dskReadAddrInt/Ext in addrController_top.v). Each sector is staged in a
+// local BRAM, then drained to SDRAM one word at a time through the shared
+// extra-slot-3 port. `done` fires only once the whole image is resident.
 module floppy_loader
 (
 	input         clk_sys,
@@ -45,6 +29,9 @@ module floppy_loader
 	output reg          done,          // one clk_sys pulse: image now fully resident
 	output reg  [63:0]  loaded_size,   // img_size, latched at this slot's own mount
 	output reg           readonly_latched,
+
+	// medium sidedness from the volume header, latched with `done`
+	output reg          media_ds,
 	output              busy
 );
 
@@ -68,14 +55,84 @@ reg  [7:0] word_idx;   // 0..255 within the current sector
 reg [10:0] sector;     // sector index within the image (up to 1600 for 800K)
 reg [10:0] nsect;      // total sectors, latched at mount
 
-// Latch every mount request unconditionally, mirroring the UK101
-// disk_reader.sv precedent - a mount
-// arriving while a previous load is still draining must not be dropped.
+// latch every mount request; one arriving during a drain must not be dropped
 reg mount_pending;
 always @(posedge clk_sys) begin
 	if (reset) mount_pending <= 1'b0;
 	else if (img_mounted && img_size != 0) mount_pending <= 1'b1;
 	else if (state == IDLE && mount_pending) mount_pending <= 1'b0;
+end
+
+// medium sniff: volume size from the Master Directory Block in sector 2
+// (drNmAlBlks * drAlBlkSiz, MFS and HFS alike); no MDB = double-sided
+localparam [15:0] MDB_SIG_MFS = 16'hD2D7;
+localparam [15:0] MDB_SIG_HFS = 16'h4244;
+// volume size in 512-byte blocks, midway between 800 and 1600
+localparam [23:0] SIDEDNESS_THRESHOLD = 24'd1200;
+
+wire [15:0] mdb_word = {sd_buff_dout[7:0], sd_buff_dout[15:8]}; // as staged above
+wire        mdb_wr   = (state == SD_WAIT_DONE) && sd_buff_wr && sd_ack &&
+                       (sector == 11'd2);
+wire        sniff_rst = reset || (state == IDLE && mount_pending); // this mount's first cycle
+
+reg [15:0] mdb_sig;     // word 0:      drSigWord
+reg [15:0] mdb_nalbk;   // word 9:      drNmAlBlks
+reg [15:0] mdb_absz_h;  // words 10-11: drAlBlkSiz, big-endian
+reg [15:0] mdb_absz_l;
+reg        mdb_seen;    // sector 2 went by, so the four words above are this image's
+
+always @(posedge clk_sys) begin
+	if (sniff_rst) mdb_seen <= 1'b0;
+	else if (mdb_wr) begin
+		case (sd_buff_addr)
+		8'd0:  mdb_sig    <= mdb_word;
+		8'd9:  mdb_nalbk  <= mdb_word;
+		8'd10: mdb_absz_h <= mdb_word;
+		8'd11: begin mdb_absz_l <= mdb_word; mdb_seen <= 1'b1; end
+		default: ;
+		endcase
+	end
+end
+
+// drAlBlkSiz is a non-zero multiple of 512, well under 64K on a floppy
+wire mdb_ok = mdb_seen &&
+              ((mdb_sig == MDB_SIG_MFS) || (mdb_sig == MDB_SIG_HFS)) &&
+              (mdb_absz_h == 16'd0) && (mdb_absz_l != 16'd0) &&
+              (mdb_absz_l[8:0] == 9'd0) && (mdb_nalbk != 16'd0);
+
+// drNmAlBlks * (drAlBlkSiz / 512), shift-add over seven cycles
+reg [23:0] vol_blocks;
+reg [23:0] mul_cand;
+reg  [6:0] mul_mult;
+reg  [2:0] mul_step;
+reg        mul_busy;
+
+always @(posedge clk_sys) begin
+	if (sniff_rst) begin
+		mul_busy   <= 1'b0;
+		vol_blocks <= 24'd0;
+	end
+	else if (mdb_wr && sd_buff_addr == 8'd11) begin
+		vol_blocks <= 24'd0;
+		mul_cand   <= {8'd0, mdb_nalbk};
+		mul_mult   <= mdb_word[15:9];
+		mul_step   <= 3'd0;
+		mul_busy   <= 1'b1;
+	end
+	else if (mul_busy) begin
+		if (mul_mult[0]) vol_blocks <= vol_blocks + mul_cand;
+		mul_cand <= {mul_cand[22:0], 1'b0};
+		mul_mult <= {1'b0, mul_mult[6:1]};
+		mul_step <= mul_step + 3'd1;
+		if (mul_step == 3'd6) mul_busy <= 1'b0;
+	end
+end
+
+// published with `done`; double-sided until the medium says otherwise
+always @(posedge clk_sys) begin
+	if (reset) media_ds <= 1'b1;
+	else if (state == DONE_PULSE)
+		media_ds <= !mdb_ok || (vol_blocks > SIDEDNESS_THRESHOLD);
 end
 
 always @(posedge clk_sys) begin
@@ -104,13 +161,7 @@ always @(posedge clk_sys) begin
 		SD_WAIT_ACK: if (sd_ack) state <= SD_WAIT_DONE;
 
 		SD_WAIT_DONE: begin
-			// hps_io's sd_buff_dout and the ROM-download ioctl_dout both come
-			// from the same raw HPS word (io_din in hps_io.sv) - the existing
-			// ROM download path byte-swaps it before writing to SDRAM
-			// (`dio_data <= {ioctl_data[7:0], ioctl_data[15:8]}` below), and
-			// the read side (extra_rom_data_demux in MacPlus.sv) expects that
-			// same convention. Missing this swap here silently transposes
-			// every byte pair in every mounted image.
+			// byte-swap as the ROM download path does; the read side expects it
 			if (sd_buff_wr && sd_ack) buf_mem[sd_buff_addr] <= {sd_buff_dout[7:0], sd_buff_dout[15:8]};
 			if (!sd_ack) begin
 				sd_rd    <= 1'b0;
@@ -119,10 +170,7 @@ always @(posedge clk_sys) begin
 			end
 		end
 
-		// One cycle for buf_rd to catch up to buf_mem[word_idx] before the
-		// first DRAIN_ASSERT reads it - buf_rd is a registered (one-cycle-
-		// latency) BRAM read, so reading it on the same cycle word_idx
-		// changes would serve the PREVIOUS word.
+		// one cycle for the registered buf_rd to catch up with word_idx
 		DRAIN_FETCH: state <= DRAIN_ASSERT;
 
 		DRAIN_ASSERT: begin

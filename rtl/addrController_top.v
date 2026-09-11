@@ -1,3 +1,5 @@
+`include "sdram_map.vh"   // floppy-image byte offsets
+
 module addrController_top(
 	// clocks:
 	input clk,
@@ -10,6 +12,7 @@ module addrController_top(
 	// system config:
 	input turbo,               // 0 = normal, 1 = faster
 	input [1:0] configROMSize,  // 0 = 64K ROM, 1 = 128K ROM, 2 = 256K ROM
+	input scsiPresent,          // 1 = machine has a SCSI bus; see rtl/mac_model.v
 	input [1:0] configRAMSize,	// 0 = 128K, 1 = 512K, 2 = 1MB, 3 = 4MB RAM
 
 	// 68000 CPU memory interface:
@@ -61,13 +64,8 @@ module addrController_top(
 	input [21:0] dskReadAddrExt,
 	output dskReadAckExt,
 
-	// interface for floppy_loader to write a mounted image into ram.
-	// Shares the previously-unused extra slot 3; int is fixed priority over
-	// ext on simultaneous requests (a concurrent dual mount only serializes
-	// the first few words, since each loader's own address only advances on
-	// its own ack). Write DATA is not routed through here - this module is
-	// address/control only, matching dskReadAddr*/dskReadAck* above - MacPlus.sv
-	// muxes the actual word using these same ack pulses.
+	// floppy_loader write port into RAM, on the previously unused extra slot 3;
+	// int has fixed priority. Address/control only, MacPlus.sv muxes the data.
 	input [21:0] dskLoadAddrInt,
 	input dskLoadReqInt,
 	output dskLoadAckInt,
@@ -75,10 +73,7 @@ module addrController_top(
 	input dskLoadReqExt,
 	output dskLoadAckExt,
 	output dskLoadWrEn,
-	// held for the whole grant cycle (unlike dskLoadAckInt/Ext, which pulse
-	// only in busPhase 3) - MacPlus.sv needs this, not the ack pulses, to
-	// mux which loader's write DATA reaches sdram.v, since that data must
-	// be stable through busPhase 1 (CAS), not just busPhase 3.
+	// held for the whole grant cycle; MacPlus.sv muxes the write data on this
 	output dskLoadSelExt
 );
 
@@ -199,9 +194,10 @@ module addrController_top(
 	// simulate smaller RAM/ROM sizes
 	assign macAddr[16] = rom_access && configROMSize == 2'b00 ? 1'b0 :     // force A16 to 0 for 64K ROM access
 									addrMux[16]; 
+	// the 64K ROM image sits at offset 0 of its slot, so A17 is forced to 0
 	assign macAddr[17] = ram_access && configRAMSize == 2'b00 ? 1'b0 :   // force A17 to 0 for 128K RAM access
 									rom_access && configROMSize == 2'b01 ? 1'b0 :  // force A17 to 0 for 128K ROM access
-									rom_access && configROMSize == 2'b00 ? 1'b1 :  // force A17 to 1 for 64K ROM access (64K ROM image is at $20000)
+									rom_access && configROMSize == 2'b00 ? 1'b0 :  // force A17 to 0 for 64K ROM access (image sits at its slot's offset 0)
 									addrMux[17]; 
 	assign macAddr[18] = ram_access && configRAMSize == 2'b00 ? 1'b0 :   // force A18 to 0 for 128K RAM access
 	                     rom_access && configROMSize != 2'b11 ? 1'b0 : // force A18 to 0 for 64K/128K/256K ROM access
@@ -225,22 +221,11 @@ module addrController_top(
 	// floppy image loader (mount-time SD->SDRAM copy) gets the previously
 	// unused extra slot 3. Fixed priority: int over ext.
 	//
-	// sdram.v does not latch a memory cycle in one shot: it issues ACTIVE
-	// (row/bank, plus the oe/we decision) from the signal values present
-	// during busPhase 0, then WRITE (column address AND write data) from the
-	// values present one clk_sys cycle later, in busPhase 1. Every memory
-	// control signal must therefore be stable for the WHOLE four-phase bus
-	// cycle - which is why MacPlus.sv's ROM download path only ever changes
-	// dio_write while ~dioBusControl, and why dskReadAck* below are asserted
-	// for a whole cycle rather than pulsed.
+	// sdram.v issues ACTIVE from busPhase 0 and WRITE (column and data) from
+	// busPhase 1, so every control signal must hold for the whole 4-phase cycle.
 	//
-	// So: sample the loader requests once at the cycle boundary and hold the
-	// grant (and hence dskLoadWrEn and the memoryAddr mux) for the entire
-	// cycle, and make the ack a late pulse in busPhase 3. A combinational
-	// grant with a cycle-wide ack would let the loader drop wr_req at the
-	// start of busPhase 1 - after RAS had committed the write, but before CAS
-	// sampled the column address and data, so every word landed at a wrong
-	// column with the CPU's data bus contents instead of the disk byte.
+	// so the loader requests are sampled once at the cycle boundary, the grant
+	// held for the whole cycle, and the ack pulsed late in busPhase 3
 	reg dskLoadReqIntR, dskLoadReqExtR;
 	always @(posedge clk) if (busPhase == 2'b11) begin
 		dskLoadReqIntR <= dskLoadReqInt;
@@ -254,15 +239,17 @@ module addrController_top(
 	assign dskLoadAckExt = dskLoadAck &  dskLoadSelExt;
 	assign dskLoadWrEn   = dskLoadGrant;
 
+	// byte offsets of each floppy image within the disk region (rtl/sdram_map.vh)
 	assign memoryAddr =
-		dskReadAckInt ? dskReadAddrInt + 22'h100000:   // first dsk image at 1MB
-		dskReadAckExt ? dskReadAddrExt + 22'h200000:   // second dsk image at 2MB
-		dskLoadGrant  ? (dskLoadSelExt ? dskLoadAddrExt + 22'h200000 : dskLoadAddrInt + 22'h100000) :
+		dskReadAckInt ? dskReadAddrInt + `DSK_INT_BYTE_OFF:   // first dsk image at 1MB
+		dskReadAckExt ? dskReadAddrExt + `DSK_EXT_BYTE_OFF:   // second dsk image at 2MB
+		dskLoadGrant  ? (dskLoadSelExt ? dskLoadAddrExt + `DSK_EXT_BYTE_OFF : dskLoadAddrInt + `DSK_INT_BYTE_OFF) :
 		macAddr;
 
 	// address decoding
 	addrDecoder ad(
 		.configROMSize(configROMSize),
+		.scsiPresent(scsiPresent),
 		.address(cpuAddr),
 		._cpuAS(_cpuAS),
 		.memoryOverlayOn(memoryOverlayOn),

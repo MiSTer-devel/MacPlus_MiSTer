@@ -1,29 +1,18 @@
 // cd_audio.sv - AppleCD audio playback engine for the SCSI CD-ROM target.
 //
-// Instantiated INSIDE scsi.v (CDROM instance only) so it shares the target's
-// HPS io channel; the only signals leaving the SCSI hierarchy are the two
-// sound outputs. Byte behavior follows MAME's nscsi_cdrom_apple_device
-// (../mame src/devices/bus/nscsi/cd.cpp) — the same oracle the target's
-// INQUIRY / 0xC1 TOC / sense already match. The HPS side of the contract
-// (TOC blob + raw-audio block windows) is documented in
-// Main_MiSTer/support/maclc/maclc_cd.h.
+// Instantiated inside scsi.v (CDROM instance only) so it shares the target's
+// HPS io channel; only the two sound outputs leave the SCSI hierarchy. Byte
+// behaviour follows MAME's nscsi_cdrom_apple_device. The HPS side (TOC blob
+// and raw-audio block windows) is Main_MiSTer/support/maclc/maclc_cd.h.
 //
-// Structure (strict single-driver: each always block owns its registers):
-//   MAIN FSM  - TOC blob fetch + parse (MCDA magic, else synthesized
-//               single-track fallback: stock Main / Verilator / flat image),
-//               0xC1 response precompute (99 descriptors, last repeated, per
-//               MAME), command execution (SEARCH/PLAY/PAUSE/STOP/SCAN),
-//               periodic track/MSF refresh for AUDIO STATUS / READ Q SUBCODE,
-//               and the playhead bookkeeping.
-//   FETCH FSM - streams 2352-byte frames (5 blocks) from the audio window
-//               into a 2-frame ping-pong buffer while playing.
-//   SAMPLE    - 44.1 kHz fractional cadence, 16-bit LE stereo, one frame
-//               consumed per 588 stereo samples.
+//   MAIN FSM  - TOC blob fetch and parse, 0xC1/0x43 response tables,
+//               command execution (SEARCH/PLAY/PAUSE/STOP/SCAN), status
+//               refresh and playhead bookkeeping
+//   FETCH FSM - streams 2352-byte frames into a 2-frame ping-pong buffer
+//   SAMPLE    - 44.1 kHz cadence, 16-bit LE stereo, 588 samples per frame
 //
-// Channel sharing: scsi.v raises ch_grant only while the target is bus-idle
-// with no data io pending; the MAIN FSM has priority over FETCH via fr_ok.
-// A data READ stops playback outright (oracle behavior), so contention is
-// self-limiting.
+// scsi.v raises ch_grant only while the target is bus-idle; MAIN has priority
+// over FETCH via fr_ok, and a data READ stops playback.
 
 module cd_audio #(
 	parameter CLK_HZ = 32'd32_500_000   // clk rate, for the 44.1 kHz cadence
@@ -44,9 +33,7 @@ module cd_audio #(
 	input             eject_stb,
 
 	// CD Audio Control page 0x0E output ports 0/1 (MODE SELECT-writable in
-	// scsi.v — the AppleCD player's volume slider). channel: 0x01 = left
-	// source, 0x02 = right, anything else mutes the port (Snow
-	// make_out_sample); volume: linear 0..255 PCM scale.
+	// scsi.v): channel 0x01 = left, 0x02 = right, else mute; volume 0..255
 	input       [7:0] ap_ch0, ap_vol0,
 	input       [7:0] ap_ch1, ap_vol1,
 
@@ -64,10 +51,7 @@ module cd_audio #(
 	// live registers for AUDIO STATUS (0xCC) / READ Q SUBCODE (0xC2)
 	output reg  [7:0] ast_code,         // 0 play, 1 paused, 3 end, 5 idle
 	output reg  [7:0] cur_ctrl,
-	output reg  [7:0] cur_trk,               // BINARY, 1-based (dialect switch:
-	                                         // vendor 0xC2/0xCC serve bin2bcd()
-	                                         // of these at the scsi.v mux; the
-	                                         // standard 0x42 serves them raw)
+	output reg  [7:0] cur_trk,               // binary, 1-based; 0xC2/0xCC serve bin2bcd of these
 	output reg  [7:0] abs_m, abs_s, abs_f,   // BINARY, no +150
 	output reg  [7:0] rel_m, rel_s, rel_f,
 
@@ -87,29 +71,17 @@ module cd_audio #(
 	output      [7:0] toc43_q0, toc43_q1, toc43_q2, toc43_q3,
 	output reg  [9:0] toc43_len,
 
-	// 0x43 format-2 (old-style FULL TOC, cmd[9]=0x80) response RAM — the
-	// AppleCD driver's actual TOC dialect on the CDU-8004 identity
-	// (2026-07-19; oracles: Snow read_toc format 2 + BlueSCSI apple-quirks).
-	// Pre-rendered response image, MMC4 6.40.3.4.1 BCD rule (POINT/TNO/
-	// MIN/SEC/FRAME binary; PMIN/PSEC/PFRAME BCD, +150 MSF):
+	// 0x43 format-2 (full TOC, cmd[9]=0x80) response RAM, MMC4 6.40.3.4.1 BCD
+	// rule (POINT/TNO/MIN/SEC/FRAME binary, PMIN/PSEC/PFRAME BCD, +150 MSF):
 	//   [0..3]     {u16be dlen, first session=01, last session=01}
-	//   [4+11r..]  11-byte rows: A0 {01,ctrl,00,A0,0*4, bcd(first)=01,
-	//              disc type=00, 00}, A1 {.., A2=0xA1, .., bcd(last),0,0},
-	//              A2 {.., 0xA2, .., bcd leadout M,S,F}, then track rows
-	//              {01, ctrl, 00, tno BIN, 0*4, bcd M, bcd S, bcd F}
-	//   [496..507] format-1 SESSION INFO page (cmd[9]=0x40, MMC-identical,
-	//              hex): {00,0A,01,01, 00,ctrl,01,00, 00,M,S,F(+150 bin)}
-	// Built by M_T2_* after the 0x43 table; toc_ready covers all three.
+	//   [4+11r..]  11-byte rows A0, A1, A2, then one per track
+	//   [496..507] format-1 SESSION INFO page (cmd[9]=0x40)
 	input       [8:0] toc2_base,
 	output      [7:0] toc2_q0, toc2_q1, toc2_q2, toc2_q3,
 	output reg  [9:0] toc2_len,
 
-	// 1 = the mounted disc has NO data track (every track's control bit 2
-	// clear). Data READs against such a disc must CHECK with ILLEGAL
-	// REQUEST/0x64 "illegal mode for this track" (BlueSCSI/Snow oracles) —
-	// the Audio CD Access extension RELIES on that failure to classify the
-	// disc; serving audio bytes as data bombs the Finder (2026-07-20,
-	// system error 10 during the Audio CD desktop mount).
+	// 1 = the disc has no data track; data READs then CHECK with ILLEGAL
+	// REQUEST/0x64, which the Audio CD Access extension relies on
 	output reg        disc_audio,
 
 	output reg signed [15:0] snd_l,
@@ -134,24 +106,15 @@ cd_sdp #(.DW(16), .AW(9)) blob_ram (
 	.wr(blob_cap && sd_buff_wr),
 	.raddr(blob_ra), .q(blob_q_ram)
 );
-// cd_sdp is a ONE-cycle-read RAM (raddr in cycle N -> q in cycle N+1) and
-// every blob reader is aligned to that: M_TRK_RD / M_CTRK_RD / M_REF_SCAN
-// were 1-cycle-correct as written, and M_HDR_RD is aligned below (HW
-// 2026-07-17: it was the one reader coded for a 2-cycle pipeline, so the
-// MCDA magic compared against word 1 and toc_valid could never set. An
-// interim global +1 register stage fixed the header but skewed the three
-// track readers — garbage start LBAs ground the MSF divider for seconds
-// per track and toc_ready never rose. One uniform 1-cycle contract now.)
+// cd_sdp is a one-cycle-read RAM (raddr in cycle N, q in cycle N+1); every
+// blob reader is aligned to that
 wire [15:0] blob_q = blob_q_ram;
 wire [7:0] blob_b0 = blob_q[7:0];      // even byte (LE lane order on FPGA)
 wire [7:0] blob_b1 = blob_q[15:8];
 
-// 0xC1 response: two byte planes x 256, two read ports each = 4 serve lanes.
-// Four mirrored 1w1r cd_sdp instances (same write, distinct read address)
-// rather than scsi_dpram: with a constant-zero wren on one port, Quartus 17
-// drops the TDP template and silently falls back to ~2000 LUTs of register
-// fabric per plane (the 2026-07-07 BRAM-inference lesson; verified in
-// map.rpt on the first fit attempt of this file).
+// 0xC1 response: two byte planes x 256, two read ports each. Four mirrored
+// 1w1r cd_sdp instances; a constant-zero wren on scsi_dpram makes Quartus
+// drop the TDP template and build registers.
 reg        resp_we;
 reg  [8:0] resp_wa;
 reg  [7:0] resp_wd;
@@ -250,12 +213,8 @@ assign toc2_q2 = t2b2[0] ? t2o_q1 : t2e_q1;
 assign toc2_q3 = t2b2[0] ? t2e_q1 : t2o_q1;
 
 
-// frame ping-pong: 2 x 2048 x 16 (1176 words = one 2352 B frame per half).
-// Each half is filled by ONE whole-frame HPS transaction (Main forces
-// blksz=2352 for the AUDIO window, PSX-style): a single sd_ack window with
-// sd_buff_addr streaming 0..1175 continuously — the wide address bits come
-// in via sd_buff_addr_hi. The old 5x512 view cost five ~2.8 ms round-trips
-// per 13.3 ms frame = chronic ~4.5% starvation, measured 2026-07-28.
+// frame ping-pong: 2 x 2048 x 16 (1176 words = one 2352 B frame per half);
+// each half is one whole-frame HPS transaction, addressed via sd_buff_addr_hi
 reg         fr_cap;
 reg         fr_half_w;
 reg [11:0]  frame_ra;
@@ -275,27 +234,12 @@ function [7:0] bcd2bin;
 	input [7:0] b;
 	bcd2bin = {4'd0, b[7:4]} * 8'd10 + {4'd0, b[3:0]};
 endfunction
-// DIVERGES FROM MacLC (2026-08-26). The original read
-//
-//   bin2bcd = v >= 8'd90 ? {4'd9, (v - 8'd90)-8'd0} : ... : v;
-//
-// where every arm concatenates a 4-bit tens digit with an 8-BIT remainder. The
-// concat is therefore 12 bits wide and the 8-bit return TRUNCATES IT, discarding
-// the tens nibble: bin2bcd(40) = 12'h400 -> 8'h00, bin2bcd(33) -> 8'h03,
-// bin2bcd(17) -> 8'h07. Every value under 10 converts correctly, which is why
-// it survives casual use -- track NUMBERS are single digits on most discs, and
-// the times a guest actually displays come from the 0x43 planes, which are
-// binary. It is the Apple 0xC1 (BCD) plane that is wrong, in all 15 call sites.
-//
-// Caught by a bench asserting a lead-out of 40:33:17, which came back as
-// 00:03:07. This is an UPSTREAM MacLC defect, not a porting slip: our
-// cd_audio.sv was byte-identical to theirs before this change.
+// bin2bcd: units must be a separate 4-bit reg; a {4-bit, 8-bit} concat is
+// 12 bits and the 8-bit return truncates the tens digit (MacLC's version).
 function [7:0] bin2bcd;                // 0..99
 	input [7:0] v;
 	reg [3:0] tens;
-	reg [3:0] units;   // MUST be its own 4-bit reg: {4-bit, 8-bit} is a 12-bit
-	                   // concat and the 8-bit return would truncate the tens
-	                   // digit away again -- that IS the bug being fixed.
+	reg [3:0] units;   // 4-bit: a {4-bit, 8-bit} concat would truncate the tens digit
 	begin
 		tens = v >= 8'd90 ? 4'd9 : v >= 8'd80 ? 4'd8 :
 		       v >= 8'd70 ? 4'd7 : v >= 8'd60 ? 4'd6 :
@@ -372,21 +316,16 @@ localparam [4:0]
 	M_APPLY    = 5'd13,
 	M_REF_SCAN = 5'd14,                     // find track containing cur_lba
 	M_REF_DIVA = 5'd15, M_REF_DIVR = 5'd16,
-	// standard 0x43 MMC TOC table build (dialect-switch mission 2026-07-19)
+	// standard 0x43 MMC TOC table build
 	M_T43_HDR  = 5'd17, M_T43_RD = 5'd18, M_T43_DIV = 5'd19, M_T43_EMIT = 5'd20,
 	M_T2_HDR   = 5'd21, M_T2_RD  = 5'd22, M_T2_DIV  = 5'd23, M_T2_TRK  = 5'd24,
 	M_T2_A2    = 5'd25, M_T2_A01 = 5'd26, M_T2_SESS = 5'd27,
 	M_SCAN_GO  = 5'd28;                     // 0xCD standard-form audio scan
 reg [4:0] mst;
 
-// 0xCD AUDIO SCAN (AppleCD player FF/RW, standard-driver form: cdb1
-// 0x00=FF / 0x10=RW, MSF hex in cdb3-5 — BlueSCSI documents the format
-// but leaves it unimplemented; the dynamics here are ours). While
-// scan_x: the playhead advances ±8 sectors per consumed frame (chirping
-// ~8x scan). Cleared by ANY other transport command, playback stop, or
-// reaching an end. Mishandling this (vendor LBA-form decode → pause)
-// wedged the PLAYER's state machine: it waits for position movement
-// that never comes and stops issuing commands (watch capture run 2).
+// 0xCD AUDIO SCAN (AppleCD player FF/RW): cdb1 0x00 = FF, 0x10 = RW, MSF
+// hex in cdb3-5. While scan_x the playhead moves +-8 sectors per frame;
+// cleared by any other transport command, stop, or an end.
 reg        scan_x;
 reg        scan_dir;                        // 1 = rewind
 
@@ -423,7 +362,7 @@ reg  [7:0] c_op, c_1, c_2, c_3, c_4, c_5, c_6, c_7, c_8, c_9;
 reg        cmd_pend;
 reg [31:0] c_addr;                      // resolved target address
 reg [31:0] c_next;                      // start of following track (track mode)
-// PLAY AUDIO(10)/(12) "from current position" sentinel (BlueSCSI 2551)
+// PLAY AUDIO(10)/(12) "from current position" sentinel
 wire       play_lba_ff = (c_2 == 8'hFF) && (c_3 == 8'hFF) &&
                          (c_4 == 8'hFF) && (c_5 == 8'hFF);
 reg  [6:0] c_trk;                       // 0-based requested track
@@ -471,13 +410,13 @@ always @(posedge clk) begin
 			c_5 <= cdb5; c_6 <= cdb6; c_7 <= cdb7; c_8 <= cdb8; c_9 <= cdb9;
 			cmd_pend <= 1'b1;
 		end
-		// oracle: a data READ (or eject / unmount) stops playback
+		// a data READ (or eject / unmount) stops playback, as on the AppleCD
 		if ((read_stb || eject_stb || bus_rst || !mounted) && pstate != ST_IDLE) begin
 			pstate <= ST_IDLE;
 			scan_x <= 1'b0;
 		end
 
-		// playhead advance, one frame at a time (±8 while 0xCD scanning)
+		// playhead advance, one frame at a time (+-8 while 0xCD scanning)
 		if (frame_done) begin
 			if (scan_x && scan_dir) begin
 				// rewind: clamp at disc start, keep scanning in place
@@ -501,16 +440,8 @@ always @(posedge clk) begin
 				mst <= M_ACQ_REQ;
 			end
 			else if (mounted && !toc_ready) begin
-				// Need-driven (re)acquisition. Root cause found on hardware
-				// 2026-07-17, with the engine stuck at mounted=1, toc_ready=0,
-				// mst=IDLE: the
-				// PRAM late-load AUTO-RESTART resets this FSM mid-acquisition;
-				// the scsi.v mounted latch survives the restart but the
-				// img_mounted PULSE never repeats, so the pulse-driven trigger
-				// above never re-fires and every 0xC1 serves a zeroed TOC ("one
-				// track", PLAY rejected). Also covers the first-mount ordering
-				// fragility (pulse vs latch update). Terminates: acquisition
-				// always ends in toc_ready=1 (real blob or synthesized).
+				// need-driven (re)acquisition: a PRAM auto-restart resets this FSM but
+				// the img_mounted pulse never repeats, so re-arm from the mounted latch
 				toc_valid <= 1'b0; blob_blk <= 1'b0;
 				mst <= M_ACQ_REQ;
 			end
@@ -532,8 +463,7 @@ always @(posedge clk) begin
 
 		// -------------------------------------------------- TOC blob fetch
 		M_ACQ_REQ:
-			// unmount escape: ca_grant requires mounted, so an eject here would
-			// park the engine forever (HW 2026-07-17: guest 0xC0 mid-session).
+			// unmount escape: ca_grant requires mounted
 			if (!mounted) mst <= M_IDLE;
 			else if (ch_grant && !fr_act) begin
 			toc_lba  <= TOC_BLK + {31'd0, blob_blk};
@@ -920,18 +850,12 @@ always @(posedge clk) begin
 				end else if (pstate == ST_PAUSE) pstate <= ST_PLAY;
 			end
 			8'hcd: begin                                   // AUDIO SCAN (FF/RW)
-				// STANDARD decode ONLY (Snow/[PIONEER]: form in cdb9[7:6],
-				// LBA=cdb2-5 / MSF binary=cdb3-5 / track=cdb5; direction
-				// cdb1: 0x00=FF, 0x10=RW per the observed driver+BlueSCSI).
-				// The 8004-identity driver sends nothing else; routing this
-				// into the vendor arm read BCD MSF from bytes 5-7 — track
-				// 4's scan {MSF 18,14,19}@3-5 became BCD 19:00:00@5-7 =
-				// seek into track 2 = the "random track" FF/RW (run 4).
+				// standard decode only: form in cdb9[7:6], LBA cdb2-5 / MSF binary cdb3-5
+				// / track cdb5; direction cdb1 0x00 = FF, 0x10 = RW
 				case (c_9[7:6])
 				2'b00:   c_addr <= {c_2, c_3, c_4, c_5};       // LBA form
 				2'b01:   c_addr <= msf2lba_std(c_3, c_4, c_5); // MSF form
-				default: c_addr <= cur_lba;  // track form unobserved: v1 =
-				                             // scan from current position
+				default: c_addr <= cur_lba;  // track form: scan from current position
 				endcase
 				mst <= M_SCAN_GO;
 			end
@@ -944,7 +868,7 @@ always @(posedge clk) begin
 				end
 				2'b10: begin                               // track number (BCD byte 5)
 					if (bcd2bin(c_5) == 8'd0) begin
-						// track 0: stop (oracle: PLAY/SEARCH track 0 stops)
+						// track 0: stop, as the AppleCD does
 						if (c_op != 8'hcb) pstate <= ST_IDLE;
 					end else begin
 						c_trk <= (bcd2bin(c_5) - 8'd1 < 8'd99) ? bcd2bin(c_5) - 8'd1 : 7'd98;
@@ -960,11 +884,10 @@ always @(posedge clk) begin
 				end
 				endcase
 			end
-			// ---- standard SCSI-2 audio set (dialect switch 2026-07-19) ----
+			// ---- standard SCSI-2 audio set ----
 			8'h47: begin                                   // PLAY AUDIO MSF (hex, +150)
-				// start FF:FF:FF = play from CURRENT position (SCSI-2;
-				// BlueSCSI doPlayAudio lba==0xFFFFFFFF). The AppleCD driver
-				// resumes from pause this way (watch capture 2026-07-20).
+				// start FF:FF:FF = play from the current position (the driver resumes
+				// from pause this way)
 				c_addr <= (c_3 == 8'hFF && c_4 == 8'hFF && c_5 == 8'hFF)
 				          ? cur_lba : msf2lba_std(c_3, c_4, c_5);
 				c_next <= msf2lba_std(c_6, c_7, c_8);
@@ -981,12 +904,8 @@ always @(posedge clk) begin
 				end
 			end
 			8'h45, 8'ha5: begin                            // PLAY AUDIO(10)/(12), LBA form
-				// Gap pass 2026-07-29; oracle BlueSCSI doPlayAudio (2379/2393):
-				// LBA 0xFFFFFFFF = play from CURRENT position (resolved before
-				// anything else, 2551); length 0 = seek-only, which falls into
-				// the 47/48 zero-length arm below via c_addr == c_next. Length
-				// is in frames: (10) = cdb7..8, (12) = cdb6..9. The LBA is
-				// already in the engine's sector domain (same as cur_lba).
+				// LBA 0xFFFFFFFF = play from the current position; length 0 = seek only
+				// (the zero-length arm below). Length in frames: (10) cdb7..8, (12) cdb6..9.
 				c_addr <= play_lba_ff ? cur_lba : {c_2, c_3, c_4, c_5};
 				c_next <= (play_lba_ff ? cur_lba : {c_2, c_3, c_4, c_5}) +
 				          ((c_op == 8'h45) ? {16'd0, c_7, c_8}
@@ -1004,9 +923,8 @@ always @(posedge clk) begin
 			default: ;                                     // 0xCE handled in scsi.v
 			endcase
 		end
-		// track mode: read start(k) then start(k+1) (or leadout when last).
-		// Address stream one word per cycle; data arrives two states later
-		// (same convention as M_HDR_RD/M_TRK_RD).
+		// track mode: read start(k) then start(k+1), or leadout when last; data
+		// arrives two states after the address, as M_HDR_RD/M_TRK_RD
 		M_CTRK_RD: begin
 			step <= step + 3'd1;
 			case (step)
@@ -1063,13 +981,7 @@ always @(posedge clk) begin
 			end
 			8'h47, 8'h48, 8'h45, 8'ha5: begin              // standard range play
 				if (c_addr == c_next) begin
-					// Zero-length play = SEEK-ONLY per SCSI-2 (BlueSCSI
-					// doPlayAudio length==0: "update the position without
-					// starting playback"). The driver's Next/Prev/Stop all
-					// park the pickup this way after a pause and expect the
-					// drive to HOLD state at the new position — reporting
-					// idle/"completed" here made the player abandon every
-					// skip (2026-07-20 watch capture). pstate unchanged.
+					// zero-length play = seek only (SCSI-2): move the position, keep pstate
 					cur_lba <= c_addr;
 					flush   <= 1'b1;
 				end else begin
@@ -1161,7 +1073,7 @@ end
 // FETCH FSM: fill the free frame half while playing
 // ============================================================================
 reg  [1:0] fr_valid;
-reg        fr_half_r;                  // half being played (owned by sample engine? no: here)
+reg        fr_half_r;                  // half being played
 reg  [1:0] fst;
 
 reg [31:0] fetch_lba;
@@ -1177,12 +1089,8 @@ always @(posedge clk) begin
 		fst <= F_IDLE; fr_cap <= 0; fr_valid <= 2'b00; fr_half_w <= 0;
 		fr_rd <= 0; fr_act <= 0; fr_lba <= 0; fetch_lba <= 0; fetch_sync <= 1'b1;
 	end else begin
-		// Free the half that FINISHED. sample_half (= fr_half_r) has already
-		// flipped by the clock this block observes frame_done, so indexing by
-		// it freed the half that had just STARTED — the ping-pong degenerated
-		// into fetch-on-demand at every boundary and playback froze for one
-		// fetch duration (~0.5-4 ms, HPS-load dependent) 75x/s: THE original
-		// "not CD quality" graininess (71 starves/s, one per half).
+		// free the half that finished: sample_half has already flipped by the
+		// clock this block sees frame_done, so index by frame_done_half_r
 		if (flush) begin fr_valid <= 2'b00; fetch_sync <= 1'b1; end
 		else if (frame_done) fr_valid[frame_done_half_r] <= 1'b0;
 
@@ -1233,16 +1141,10 @@ reg        frame_done_r;
 reg        frame_done_half_r;   // WHICH half just finished (captured pre-flip)
 assign frame_done = frame_done_r;
 
-// The 44.1 kHz targets are linearly interpolated on the way out (below):
-// sys/audio_out.sv picks AUDIO_L/R up with a free-running 48 kHz zero-order
-// hold, and feeding it the raw stair-step adds audible imaging ("not CD
-// quality" report, 07-28). Interpolating continuously in the 32.5 MHz domain
-// means whatever instant the framework samples, it sees a point on the
-// segment between the previous and current cadence targets — no knowledge of
-// the 48 kHz phase needed. frac16 is a Q16 approximation of the segment
-// phase (increment 89 ~= 65536*44100/32.5MHz per clk, saturating; reset at
-// each pair commit). Interpolation never leaves the [prev,target] range, so
-// the 16-bit output cannot overflow.
+// The 44.1 kHz targets are linearly interpolated on the way out, since
+// sys/audio_out.sv samples with a free-running 48 kHz zero-order hold and
+// the raw stair-step is audible. frac16 is a Q16 segment phase (increment
+// 89 per clk, saturating, reset at each pair commit).
 reg signed [15:0] snd_l_t, snd_r_t;   // cadence-tick targets (was snd_l/r)
 reg signed [15:0] snd_l_p, snd_r_p;   // previous targets (segment start)
 reg        [16:0] frac16;             // Q16 segment phase, saturating at 1.0
@@ -1278,8 +1180,7 @@ always @(posedge clk) begin
 						widx <= 0;
 						fr_half_r <= ~fr_half_r;
 						frame_done_r <= 1'b1;
-						// nonblocking: captures the PRE-flip half — the one
-						// that just finished playing
+						// nonblocking: captures the pre-flip half, the one that just finished
 						frame_done_half_r <= fr_half_r;
 					end else widx <= widx + 11'd2;
 				end
@@ -1296,16 +1197,9 @@ always @(posedge clk) begin
 	end
 end
 
-// Interpolated output stage — the only driver of snd_l/snd_r.
-// The output register commits only every 8th clk (246 ns hold, ~92 points
-// per 44.1 kHz sample): sys/audio_out.sv's clk_audio pickup is a STABILITY
-// FILTER — two consecutive 24.576 MHz captures must be EQUAL before a value
-// is accepted (audio_out.sv "if(cl2 == cl1)") — so a bus that moves every
-// clk_sys is rejected outright: the framework freezes through any fast
-// segment and jumps where the ramp flattens (= the "scratchy, sometimes
-// muffled" report on the every-clk version of this stage, 07-28 evening).
-// The 8-clk hold spans ~6 clk_audio captures, so every step is accepted,
-// while the stair-step imaging the interpolation exists to kill stays gone.
+// Interpolated output stage, the only driver of snd_l/snd_r. The output
+// commits every 8th clk: sys/audio_out.sv accepts a value only after two
+// equal consecutive captures, so a bus moving every clk_sys is rejected.
 wire        [15:0] seg_f  = frac16[16] ? 16'hFFFF : frac16[15:0];
 wire signed [16:0] seg_dl = {snd_l_t[15], snd_l_t} - {snd_l_p[15], snd_l_p};
 wire signed [16:0] seg_dr = {snd_r_t[15], snd_r_t} - {snd_r_p[15], snd_r_p};
@@ -1313,21 +1207,10 @@ wire signed [33:0] seg_ml = seg_dl * $signed({1'b0, seg_f});
 wire signed [33:0] seg_mr = seg_dr * $signed({1'b0, seg_f});
 wire signed [16:0] sum_l  = {snd_l_p[15], snd_l_p} + $signed(seg_ml[32:16]);
 wire signed [16:0] sum_r  = {snd_r_p[15], snd_r_p} + $signed(seg_mr[32:16]);
-// CD Audio Control page 0x0E port scaling (2026-07-29 — the volume slider).
-// Source routing per port channel byte (0x01 = left, 0x02 = right, other =
-// mute; Snow make_out_sample), then the hardware volume law: a Q15 gain from
-// cd_vol_lut.vh, gain = (vol/255)^5, so 255 is exact unity and 0 exact mute.
-//
-// The law was MEASURED, not assumed: a
-// linear (s*vol)>>8 — what MAME, Snow and BlueSCSI all do — compresses the
-// AppleCD player's whole 16-step ladder into 5.85 dB with 0.10 dB steps at
-// the top, while a real Quadra 800 + AppleCD drive spans 28.0 dB with even
-// ~2.00 dB steps. Fit over the bytes the player actually sends gives an
-// exponent of 5.
-//
-// Applied to the interpolated value BEFORE the 8-clk commit register, so the
-// framework's stability-filter contract (output holds ≥8 clk_sys) is
-// untouched.
+// CD Audio Control page 0x0E port scaling: source per port channel byte
+// (0x01 = left, 0x02 = right, other = mute), then gain = (vol/255)^5 from
+// cd_vol_lut.vh, a Q15 value measured against a real AppleCD drive. Applied
+// before the 8-clk commit register.
 wire signed [15:0] ap_src_l = (ap_ch0 == 8'h01) ? sum_l[15:0] :
                               (ap_ch0 == 8'h02) ? sum_r[15:0] : 16'sd0;
 wire signed [15:0] ap_src_r = (ap_ch1 == 8'h02) ? sum_r[15:0] :
@@ -1352,10 +1235,8 @@ end
 
 endmodule
 
-// Minimal simple-dual-port RAM (one write, one registered read) for the
-// single-reader buffers above — scsi_dpram would burn two unused mirror
-// arrays per instance (the map.rpt M10K check applies here; see the
-// 2026-07-07 BRAM-inference lesson: exactly one write statement per array).
+// simple dual-port RAM (one write, one registered read) for the
+// single-reader buffers above
 module cd_sdp #(parameter DW = 16, AW = 12)
 (
 	input           clock,
@@ -1365,24 +1246,15 @@ module cd_sdp #(parameter DW = 16, AW = 12)
 	input  [AW-1:0] raddr,
 	output reg [DW-1:0] q
 );
-// vram_bram's hardware-proven inference recipe (see rtl/vram_bram.sv):
-// forced "M10K" (overrides the small-RAM heuristic that silently turned the
-// 2 Kbit response planes into ~2000 registers each — fit attempts #1-#3 of
-// this file) + no_rw_check, with write and read in SEPARATE always blocks.
+// forced M10K with no_rw_check, write and read in separate always blocks
+// (AUTO turned the 2 Kbit planes into registers)
 (* ramstyle = "M10K,no_rw_check" *) reg [DW-1:0] ram [0:(1<<AW)-1];
 always @(posedge clock) if (wr) ram[waddr] <= wdata;
 always @(posedge clock) q <= ram[raddr];
 endmodule
 
-// MLAB variant for the small (2 Kbit) planes. Same contract as cd_sdp; the
-// forced-M10K recipe above exists because AUTO turned these into ~2000
-// registers each — MLAB is the third option that recipe predates: ALM-based
-// distributed RAM, zero M10K blocks. Motivation (2026-08-03): the device is
-// at 513/553 M10K blocks (93%) while only 71% of memory BITS are used —
-// M10K placement pressure is the per-seed fit-marginality driver, and the
-// twelve 256x8 planes burned 12 whole blocks at 20% fill. Their ping-pong
-// usage never reads a plane being written (write one half, read the other),
-// so MLAB read-during-write semantics are safe with no_rw_check.
+// MLAB variant for the small 2 Kbit planes; same contract as cd_sdp. The
+// ping-pong use never reads a plane being written, so no_rw_check is safe.
 module cd_sdp_mlab #(parameter DW = 16, AW = 12)
 (
 	input           clock,
