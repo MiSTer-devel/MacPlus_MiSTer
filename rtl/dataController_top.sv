@@ -3,6 +3,7 @@ module dataController_top(
 	input clk32,					// 32.5 MHz pixel clock
 	input clk8_en_p,
 	input clk8_en_n,
+	input cpu_skip,     // this clk8 is not a CPU clock (cpu_wait.v)
 	input clk16_en_n,		// for the IWM read-latch clear only, see iwm.v
 	input E_rising,
 	input E_falling,
@@ -55,6 +56,7 @@ module dataController_top(
 	 
 	// mouse:
 	input [24:0] ps2_mouse,
+	input [4:0] mouseDiv,   // host counts per Mac count, see rtl/ps2_mouse.v
 	
 	// serial:
 	input serialIn, 
@@ -498,6 +500,7 @@ module dataController_top(
 		.cen(clk8_en_n),
 		.cen16(clk16_en_n),
 		.turbo(turbo),
+		.cpu_tick(!cpu_skip),
 		._reset(_cpuReset),
 		.selectIWM(selectIWM),
 		._cpuRW(_cpuRW),
@@ -587,6 +590,7 @@ module dataController_top(
 		.ce(clk8_en_p),
 		.reset(~_cpuReset),
 		.ps2_mouse(ps2_mouse),
+		.div(mouseDiv),
 		.x1(mouseX1),
 		.y1(mouseY1),
 		.x2(mouseX2),
@@ -630,6 +634,7 @@ module dataController_top(
 		.adb_dout_strobe(adb_dout_strobe),
 
 		.ps2_mouse(ps2_mouse),
+		.mouseDiv(mouseDiv),
 		.ps2_key(ps2_key)
 	);
 

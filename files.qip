@@ -27,6 +27,7 @@ set_global_assignment -name VERILOG_FILE rtl/mac_model.v
 set_global_assignment -name VERILOG_FILE rtl/disk_pwm_duty.v
 set_global_assignment -name VERILOG_FILE rtl/addrDecoder.v
 set_global_assignment -name VERILOG_FILE rtl/addrController_top.v
+set_global_assignment -name VERILOG_FILE rtl/cpu_wait.v
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/dataController_top.sv
 set_global_assignment -name VERILOG_FILE rtl/videoTimer.v
 set_global_assignment -name VERILOG_FILE rtl/videoShifter.v

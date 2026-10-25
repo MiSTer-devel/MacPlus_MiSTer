@@ -86,6 +86,8 @@ localparam CONF_STR = {
 	"O13,Model,Plus,SE,512K,128K,512Ke;",
 	"O5,Speed,8MHz,16MHz;",
 	"O6,Floppy Write,Off,On;",
+	// host mouse counts per Mac count: the Plus counts 180/inch, so cpi/180 is pixel-exact
+	"OMP,Mouse Speed,8,1,2,3,4,5,6,7,9,10,11,12,13,14,15,16;",
 	"ODE,CPU,68000,68010,68020;",
 	"D1O4,Memory,1MB,4MB;",
 	"-;",
@@ -99,6 +101,29 @@ localparam CONF_STR = {
 };
 
 wire status_turbo = status[5];
+
+// OSD Mouse Speed index -> host counts per Mac count
+reg [4:0] mouse_div;
+always @(*) begin
+	case (status[25:22])
+		4'd0:  mouse_div = 5'd8;   // default: pixel-exact for a ~1440 cpi mouse
+		4'd1:  mouse_div = 5'd1;
+		4'd2:  mouse_div = 5'd2;
+		4'd3:  mouse_div = 5'd3;
+		4'd4:  mouse_div = 5'd4;
+		4'd5:  mouse_div = 5'd5;
+		4'd6:  mouse_div = 5'd6;
+		4'd7:  mouse_div = 5'd7;
+		4'd8:  mouse_div = 5'd9;
+		4'd9:  mouse_div = 5'd10;
+		4'd10: mouse_div = 5'd11;
+		4'd11: mouse_div = 5'd12;
+		4'd12: mouse_div = 5'd13;
+		4'd13: mouse_div = 5'd14;
+		4'd14: mouse_div = 5'd15;
+		4'd15: mouse_div = 5'd16;
+	endcase
+end
 
 // OSD items unavailable on the selected model; driven beside mac_model below
 wire [15:0] status_menumask;
@@ -466,6 +491,8 @@ assign wc_ext_wr_ack  = slot3_ext_ack & ~ldr_ext_wr_req;
 wire wp_int = ~status[6] | ldr_int_readonly;
 wire wp_ext = ~status[6] | ldr_ext_readonly;
 
+wire cpu_wait_hold, cpu_skip;  // see cpu_wait below
+
 // dtack generation in turbo mode
 reg  turbo_dtack_en, cpuBusControl_d;
 always @(posedge clk_sys) begin
@@ -482,12 +509,33 @@ end
 assign      _cpuVPA = (cpuFC == 3'b111) ? 1'b0 : ~(!_cpuAS && cpuAddr[23:21] == 3'b111);
 // SCSI back-pressure: scsi_bus_hold stretches a pseudo-DMA access the target
 // cannot serve yet (see ncr5380.sv); bounded by the target's io-stall watchdog
-assign      _cpuDTACK = ~(!_cpuAS && cpuAddr[23:21] != 3'b111) | (status_turbo & !turbo_dtack_en) | scsi_bus_hold;
+assign      _cpuDTACK = ~(!_cpuAS && cpuAddr[23:21] != 3'b111) | (status_turbo & !turbo_dtack_en) | scsi_bus_hold | cpu_wait_hold;
 
-wire        cpu_en_p      = status_turbo ? clk16_en_p : clk8_en_p;
-wire        cpu_en_n      = status_turbo ? clk16_en_n : clk8_en_n;
+wire        cpu_en_p      = status_turbo ? clk16_en_p : clk8_en_p & !cpu_skip;
+wire        cpu_en_n      = status_turbo ? clk16_en_n : clk8_en_n & !cpu_skip;
 
 wire        is68000       = status_cpu == 0;
+
+// Real Plus/SE wait states and the 7.8336 MHz CPU clock; 68000 at 8 MHz only
+cpu_wait cpu_wait
+(
+	.clk         ( clk_sys                  ),
+	.clk8_en_p   ( clk8_en_p                ),
+	.authentic   ( !status_turbo && is68000 ),
+	.machineType ( machineType              ),
+	._vblank     ( _vblank                  ),
+	.snd_advance ( snd_advance              ),
+	._cpuAS      ( _cpuAS                   ),
+	.selectRAM   ( selectRAM                ),
+	.selectROM   ( selectROM                ),
+	.selectSCSI  ( selectSCSI               ),
+	.selectIWM   ( selectIWM                ),
+	.selectSCC   ( selectSCC                ),
+	.phase       (                          ),
+	.display     (                          ),
+	.hold        ( cpu_wait_hold            ),
+	.cpu_skip    ( cpu_skip                 )
+);
 assign      _cpuReset_o   = is68000 ? fx68_reset_n : tg68_reset_n;
 assign      _cpuRW        = is68000 ? fx68_rw : tg68_rw;
 assign      _cpuAS        = is68000 ? fx68_as_n : tg68_as_n;
@@ -676,6 +724,7 @@ dataController_top #(.SCSI_DEVS(SCSI_DEVS), .SCSI_CD_DEV(SCSI_CD_DEV)) dc0
 	.clk32(clk_sys), 
 	.clk8_en_p(clk8_en_p),
 	.clk8_en_n(clk8_en_n),
+	.cpu_skip(cpu_skip),
 	.clk16_en_n(clk16_en_n),
 	.E_rising(E_rising),
 	.E_falling(E_falling),
@@ -709,6 +758,7 @@ dataController_top #(.SCSI_DEVS(SCSI_DEVS), .SCSI_CD_DEV(SCSI_CD_DEV)) dc0
 	.ps2_key(ps2_key), 
 	.capslock(capslock),
 	.ps2_mouse(ps2_mouse),
+	.mouseDiv(mouse_div),
 	// serial uart
 	.serialIn(serialIn),
 	.serialOut(serialOut),

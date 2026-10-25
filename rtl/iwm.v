@@ -38,6 +38,7 @@ module iwm
 	// byte rate stays at 8 MHz
 	input cen16,
 	input turbo,
+	input cpu_tick,   // this cep is also a CPU clock: floppy byte pacing, see floppy.v
 
 	input _reset,
 	input selectIWM,
@@ -166,6 +167,7 @@ module iwm
 		.clk(clk),
 		.cep(cep),
 		.cen(cen),
+		.cpu_tick(cpu_tick),
 
 		._reset(_reset),
 		.ca0(ca0),
@@ -214,6 +216,7 @@ module iwm
 		.clk(clk),
 		.cep(cep),
 		.cen(cen),
+		.cpu_tick(cpu_tick),
 
 		._reset(_reset),
 		.ca0(ca0),

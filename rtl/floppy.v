@@ -63,6 +63,9 @@ module floppy
 	input clk,
 	input cep,
 	input cen,
+	// this cep is also a CPU clock: the IWM byte rate and the TACH the ROM
+	// times both count CPU clocks, so they slow with the 7.8336 MHz trim
+	input cpu_tick,
 
 	input _reset,
 	input ca0,				// PH0
@@ -248,7 +251,7 @@ module floppy
 			decReady <= 1'b0; // default; pulsed for exactly one cep below
 
 			// byte pacing runs on the same clk8 cadence as diskDataByteTimer
-			if (cep && writeBusyReg) begin
+			if (cep && cpu_tick && writeBusyReg) begin
 				if (_enable == 1'b1) begin
 					// drive deselected mid-byte: it never reached the media
 					writeBusyReg     <= 1'b0;
@@ -360,7 +363,7 @@ module floppy
 		else begin			
 			if(cep) begin
 			// at time 0, latch a new byte and advance the drive head
-			if (diskDataByteTimer == 0 && readyToAdvanceHead && diskImageData != 0) begin
+			if (cpu_tick && diskDataByteTimer == 0 && readyToAdvanceHead && diskImageData != 0) begin
 				diskDataIn <= diskImageData;
 				newByteReady <= 1;
 				diskDataByteTimer <= 1;  // make timer run again
@@ -376,7 +379,7 @@ module floppy
 			// is 8MHZ/128 = 16us
 			else begin
 				// a timer governs when the next disk byte will become available
-				diskDataByteTimer <= diskDataByteTimer + 1'b1;
+				if (cpu_tick) diskDataByteTimer <= diskDataByteTimer + 1'b1;
 
 				newByteReady <= 1'b0;
 
@@ -545,7 +548,7 @@ module floppy
 			driveRegs[`DRIVE_REG_TACH] <= 1'b0;
 			driveTachTimer <= 0;
 		end 
-		else if(cep) begin
+		else if(cep && cpu_tick) begin  // CPU clocks: the ROM measures TACH in them
 			if (driveTachTimer == driveTachPeriod) begin
 				driveTachTimer <= 0;
 				driveRegs[`DRIVE_REG_TACH] <= ~driveRegs[`DRIVE_REG_TACH];
