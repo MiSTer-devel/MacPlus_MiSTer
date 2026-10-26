@@ -71,6 +71,8 @@ The CPU speed can be adjusted to 8 MHz (original speed) or 16 MHz. This port imp
 
 The CPU model can be set to 68000 (the cycle-accurate fx68k), 68010 or 68020 (TG68K, which is not cycle-accurate). Changing the model takes effect on "Reset & Apply CPU+Memory".
 
+At 8 MHz with the 68000, the core runs at the speed of a real machine: the CPU clock is 7.8336 MHz and bus accesses take the wait states of a real Plus or SE, including video's share of RAM. 16 MHz and the 68010/68020 keep the previous, faster timing.
+
 ## Memory
 
 1MB and 4MB memory configurations are available on the Plus and the SE; the other models had their RAM soldered down and always report their own size. Cold boot with 4MB RAM selected takes some time before it starts to boot from FDD/SCSI, so be patient. Warm boot won't take as long.
@@ -78,3 +80,7 @@ The CPU model can be set to 68000 (the cycle-accurate fx68k), 68010 or 68020 (TG
 ## Keyboard
 
 The Alt key is mapped to the Mac's Command (⌘) key, and the Windows key is mapped to the Mac's Option (⌥) key. Core emulates keyboard with numeric keypad.
+
+## Mouse
+
+"Mouse Speed" sets how many host mouse counts make one Mac mouse count; higher is slower. The default of 8 suits a typical mouse of about 1400 cpi. It applies to the Plus mouse and the SE's ADB mouse alike.

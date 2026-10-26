@@ -16,6 +16,7 @@ module adb(
 	output reg       capslock,
 
 	input     [24:0] ps2_mouse,
+	input      [4:0] mouseDiv,   // OSD Mouse Speed, host counts per Plus count
 	input     [10:0] ps2_key
 );
 
@@ -33,6 +34,7 @@ wire  [3:0] cmd = adb_din[3:0];
 wire  [3:0] addr = adb_din[7:4];
 
 reg         sendResponse;
+wire        pollHasData;
 
 always @(posedge clk) begin
 	if (reset) begin
@@ -94,14 +96,18 @@ always @(posedge clk) begin
 
 		2'b11: // idle
 		begin
+			// Auto-poll: interrupt only if the device answered or an SRQ was seen;
+			// the ROM then reads the response from its first byte (state 3 -> 1)
+			respCnt <= 0;
 			if (cmd_r[3:2] == 2'b11 && idleActive) begin
 				if (talkTimer != 0)
 					talkTimer <= talkTimer - 1'd1;
+				else if (!pollHasData)
+					talkTimer <= TALKINTERVAL;
 				else begin
 					adb_dout <= 8'hFF;
 					adb_dout_strobe <= 1;
 					talkTimer <= TALKINTERVAL;
-					idleActive <= 0;
 				end
 			end
 		end
@@ -121,6 +127,9 @@ wire   int_inhibit = respCnt < 3 &&
                      ((addr_r == addrMouse && mouseValid == 2'b01) ||
 					  (addr_r == addrKeyboard && (keyboardValid == 1 || keyboardValid == 2)));
 assign _int = ~(irq && (st == 2'b01 || st == 2'b10)) | int_inhibit;
+assign pollHasData = mouseInt | keyboardInt |
+                     (addr_r == addrMouse && mouseValid == 2'b01) |
+                     (addr_r == addrKeyboard && (keyboardValid == 1 || keyboardValid == 2));
 
 // Mouse handler
 reg  [15:0] mouseReg3;
@@ -134,25 +143,53 @@ wire       mouseStrobe = mstb ^ ps2_mouse[24];
 wire [8:0] mouseX = {ps2_mouse[4], ps2_mouse[15:8]};
 wire [8:0] mouseY = {ps2_mouse[5], ps2_mouse[23:16]};
 wire       button = ps2_mouse[0];
+reg        btnRep;
+
+// ADB mouse is 100 cpi vs the Plus's 180: one ADB count = 9*div/5 host counts.
+// Host deltas x5 queue per axis and drain into X/Y until the Talk reads them.
+wire  [4:0] divq = (mouseDiv == 0) ? 5'd1 : mouseDiv;
+wire signed [15:0] unit = {7'd0, divq, 3'd0} + divq;
+wire signed [15:0] addX = mouseStrobe ? ({{7{mouseX[8]}}, mouseX} * 16'sd5) : 16'sd0;
+wire signed [15:0] addY = mouseStrobe ? -({{7{mouseY[8]}}, mouseY} * 16'sd5) : 16'sd0;
+reg  signed [15:0] bx, by;
+
+wire drainEn = mouseValid != 2'b10 && (st == 2'b00 || st == 2'b11);
+wire xUp = drainEn && bx >= unit && X != 7'h3F;
+wire xDn = drainEn && bx <= -unit && X != 7'h40;
+wire yUp = drainEn && by >= unit && Y != 7'h3F;
+wire yDn = drainEn && by <= -unit && Y != 7'h40;
+
+// Saturate so a Mac that stops polling cannot wrap the backlog.
+function signed [15:0] sat(input signed [16:0] v);
+	sat = (v > 17'sd16383) ? 16'sd16383 : (v < -17'sd16383) ? -16'sd16383 : v[15:0];
+endfunction
 
 always @(posedge clk) begin
 	if (reset || cmd_r == 0) begin
 		mouseReg3 <= 16'h6301; // device id: 3 device handler id: 1
 		X <= 0;
 		Y <= 0;
+		bx <= 0;
+		by <= 0;
+		btnRep <= 0;
 		mouseValid <= 0;
 	end else if (clk_en) begin
 
-		if (mouseStrobe) begin
-			if (~mouseX[8] & |mouseX[7:6]) X <= 7'h3F;
-			else if (mouseX[8] & ~mouseX[6]) X <= 7'h40;
-			else X <= mouseX[6:0];
+		bx <= sat(bx + addX - (xUp ? unit : 16'sd0) + (xDn ? unit : 16'sd0));
+		by <= sat(by + addY - (yUp ? unit : 16'sd0) + (yDn ? unit : 16'sd0));
+		if (xUp) X <= X + 1'd1;
+		if (xDn) X <= X - 1'd1;
+		if (yUp) Y <= Y + 1'd1;
+		if (yDn) Y <= Y - 1'd1;
 
-			if (~mouseY[8] & |mouseY[7:6]) Y <= 7'h40;
-			else if (mouseY[8] & ~mouseY[6]) Y <= 7'h3F;
-			else Y <= -mouseY[6:0];
-
-			mouseValid <= 2'b01;
+		// Offer once the drain has stopped; the button follows until the read
+		if (drainEn && !(xUp | xDn | yUp | yDn)) begin
+			if (mouseValid == 2'b01)
+				btnRep <= button;
+			else if (X != 0 || Y != 0 || button != btnRep) begin
+				btnRep <= button;
+				mouseValid <= 2'b01;
+			end
 		end
 
 		if (addr_r == addrMouse) begin
@@ -161,11 +198,15 @@ always @(posedge clk) begin
 				// mouse data sent
 				mouseValid <= 2'b10;
 
-			if ((mouseValid == 2'b10 && st == 2'b00) || cmd_r == 4'b0001) begin
+			if ((mouseValid == 2'b10 && (st == 2'b00 || st == 2'b11)) || cmd_r == 4'b0001) begin
 				// Flush mouse data after read or flush command
 				mouseValid <= 0;
 				X <= 0;
 				Y <= 0;
+				if (cmd_r == 4'b0001) begin
+					bx <= 0;
+					by <= 0;
+				end
 			end
 		end
 
@@ -316,7 +357,7 @@ always @(*) begin
 		end else begin
 			// talk
 			case (r_r)
-			2'b00: talkReg = { ~button, Y, 1'b1, X };
+			2'b00: talkReg = { ~btnRep, Y, 1'b1, X };
 			2'b11: talkReg = mouseReg3;
 			default: ;
 			endcase
