@@ -12,9 +12,6 @@
 // Display follows the Mac raster, one line per sound word from the VBL:
 // lines 0-27 blank, then the first 256 of every 352 CPU clocks, plus the
 // sound slot at the end of each line.
-//
-// cpu_skip drops 5,168 of every 135,408 clk8, so the CPU runs at 7.8336 MHz
-// per frame; video, sound and the IWM stay on clk8.
 module cpu_wait(
 	input        clk,
 	input        clk8_en_p,     // CPU phi1, once per 8 MHz clock
@@ -30,34 +27,12 @@ module cpu_wait(
 	input        selectSCC,
 	output [3:0] phase,         // C8M clock within the 16-clock slot frame
 	output       display,       // video owns its RAM slots now
-	output       hold,          // 1 = withhold DTACK
-	output       cpu_skip       // 1 = this clk8 is not a CPU clock
+	output       hold           // 1 = withhold DTACK
 );
-
-	// 130,240 CPU clocks in each 135,408 clk8, registered on phi1 so phi2 and
-	// phi1 drop together and fx68k still sees them alternate
-	localparam [17:0] FRAME_CLK8  = 18'd135408;
-	localparam [17:0] SKIPS       = 18'd5168;
-	reg  [17:0] skip_acc = 18'd0;
-	reg         skip = 1'b0;
-	wire [17:0] skip_next = skip_acc + SKIPS;
-	always @(posedge clk) if (clk8_en_p) begin
-		if (!authentic) begin
-			skip <= 1'b0;
-		end else if (skip_next >= FRAME_CLK8) begin
-			skip_acc <= skip_next - FRAME_CLK8;
-			skip     <= 1'b1;
-		end else begin
-			skip_acc <= skip_next;
-			skip     <= 1'b0;
-		end
-	end
-	assign cpu_skip = skip;
-	wire cpu_clk = clk8_en_p && !skip;
 
 	// 16-clock slot frame: the Plus uses phase[2:0] as C1M, the SE all four
 	reg [3:0] ph = 4'd0;
-	always @(posedge clk) if (cpu_clk) ph <= ph + 4'd1;
+	always @(posedge clk) if (clk8_en_p) ph <= ph + 4'd1;
 	assign phase = ph;
 
 	// Mac raster in CPU clocks: 352 per line, 256 display, sound slot last 8
@@ -75,7 +50,7 @@ module cpu_wait(
 			line          <= frame_pending ? 9'd0 : line + 9'd1;
 			frame_pending <= 1'b0;
 			xclk          <= 9'd0;
-		end else if (!skip && xclk != 9'h1FF)
+		end else if (xclk != 9'h1FF)
 			xclk <= xclk + 9'd1;
 	end
 	assign display = (line >= FIRST_DISPLAY_LINE && xclk < DISPLAY_CLOCKS) ||
@@ -85,7 +60,7 @@ module cpu_wait(
 	reg [1:0] as_age = 2'd0;
 	always @(posedge clk)
 		if (_cpuAS) as_age <= 2'd0;
-		else if (cpu_clk && as_age != 2'd3) as_age <= as_age + 2'd1;
+		else if (clk8_en_p && as_age != 2'd3) as_age <= as_age + 2'd1;
 
 	// release windows: phase = target + 2
 	wire grid_ok    = ph[1:0] == 2'd3;                       // target 1 mod 4

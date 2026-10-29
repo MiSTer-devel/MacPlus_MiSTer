@@ -15,7 +15,7 @@
 // over FETCH via fr_ok, and a data READ stops playback.
 
 module cd_audio #(
-	parameter CLK_HZ = 32'd32_500_000   // clk rate, for the 44.1 kHz cadence
+	parameter CLK_HZ = 32'd31_334_400   // clk rate, for the 44.1 kHz cadence
 )(
 	input             clk,
 	input             rst,       // SYSTEM reset only (survives SCSI bus resets)
@@ -1144,10 +1144,11 @@ assign frame_done = frame_done_r;
 // The 44.1 kHz targets are linearly interpolated on the way out, since
 // sys/audio_out.sv samples with a free-running 48 kHz zero-order hold and
 // the raw stair-step is audible. frac16 is a Q16 segment phase (increment
-// 89 per clk, saturating, reset at each pair commit).
+// FRAC_STEP per clk, saturating, reset at each pair commit).
 reg signed [15:0] snd_l_t, snd_r_t;   // cadence-tick targets (was snd_l/r)
 reg signed [15:0] snd_l_p, snd_r_p;   // previous targets (segment start)
 reg        [16:0] frac16;             // Q16 segment phase, saturating at 1.0
+localparam [16:0] FRAC_STEP = (64'd65536 * 44100 + CLK_HZ / 2) / CLK_HZ;   // 92 at 31.3344 MHz
 
 always @(posedge clk) begin
 	if (rst) begin
@@ -1156,7 +1157,7 @@ always @(posedge clk) begin
 		frac16 <= 0; fr_half_r <= 0; frame_ra <= 0;
 	end else begin
 		frame_done_r <= 1'b0;
-		if (!frac16[16]) frac16 <= frac16 + 17'd89;
+		if (!frac16[16]) frac16 <= frac16 + FRAC_STEP;
 		if (flush) begin
 			widx <= 0; acc <= 0; sph <= 0; fr_half_r <= 1'b0;
 		end

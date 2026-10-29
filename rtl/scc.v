@@ -908,7 +908,7 @@ wr_3_a[7:6]  -- bits per char
 
 //reg [23:0] baud_divid_speed_a = 24'd1088;
 //reg [23:0] baud_divid_speed_a = 24'd544;
-reg [23:0] baud_divid_speed_a = 24'd282;
+reg [23:0] baud_divid_speed_a = 24'd272;   // 31.3344 MHz / 115,200, exact
 //reg [23:0] baud_divid_speed_a = 24'd564;
 wire tx_busy_a;
 wire rx_wr_a;

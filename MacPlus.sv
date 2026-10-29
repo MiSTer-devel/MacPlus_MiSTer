@@ -268,12 +268,12 @@ hps_io #(.CONF_STR(CONF_STR), .VDNUM(VDNUM), .WIDE(1)) hps_io
 );
 
 assign CLK_VIDEO = clk_sys;
-assign CE_PIXEL  = 1;
+assign CE_PIXEL  = clk16_en_p;	// the 15.6672 MHz dot clock, as the SE/30 core
 
 assign VGA_R  = {8{pixelOut}};
 assign VGA_G  = {8{pixelOut}};
 assign VGA_B  = {8{pixelOut}};
-assign VGA_DE = _vblank & _hblank;
+assign VGA_DE = vid_de;
 assign VGA_VS = vsync;
 assign VGA_HS = hsync;
 assign VGA_F1 = 0;
@@ -284,11 +284,11 @@ wire [10:0] audio;
 // `audio` is signed and carries a +28,448 pedestal while sound is disabled;
 // rtl/cd_mix.v DC-blocks it ahead of the adder so CD audio cannot clip on it
 
-// 48 kHz strobe, where sys/audio_out.sv samples AUDIO_L/R (32.5 MHz / 677)
+// 48 kHz strobe, where sys/audio_out.sv samples AUDIO_L/R (31.3344 MHz / 653)
 reg  [9:0] snd_ce_div = 0;
 reg        snd_ce = 0;
 always @(posedge clk_sys) begin
-	if (snd_ce_div == 10'd676) begin snd_ce_div <= 0; snd_ce <= 1'b1; end
+	if (snd_ce_div == 10'd652) begin snd_ce_div <= 0; snd_ce <= 1'b1; end
 	else                       begin snd_ce_div <= snd_ce_div + 1'd1; snd_ce <= 1'b0; end
 end
 
@@ -431,7 +431,7 @@ wire [15:0] memoryDataOut;
 wire memoryLatch;
 
 // peripherals
-wire vid_alt, loadPixels, pixelOut, _hblank, _vblank, hsync, vsync;
+wire vid_alt, loadPixels, pixelOut, _hblank, _vblank, vid_de, hsync, vsync;
 wire memoryOverlayOn, selectSCSI, selectSCC, selectIWM, selectVIA, selectRAM, selectROM, selectSEOverlay;
 wire        scsi_bus_hold; // SCSI pseudo-DMA back-pressure, see ncr5380.sv
 wire [15:0] dataControllerDataOut;
@@ -491,7 +491,7 @@ assign wc_ext_wr_ack  = slot3_ext_ack & ~ldr_ext_wr_req;
 wire wp_int = ~status[6] | ldr_int_readonly;
 wire wp_ext = ~status[6] | ldr_ext_readonly;
 
-wire cpu_wait_hold, cpu_skip;  // see cpu_wait below
+wire cpu_wait_hold;  // see cpu_wait below
 
 // dtack generation in turbo mode
 reg  turbo_dtack_en, cpuBusControl_d;
@@ -511,12 +511,12 @@ assign      _cpuVPA = (cpuFC == 3'b111) ? 1'b0 : ~(!_cpuAS && cpuAddr[23:21] == 
 // cannot serve yet (see ncr5380.sv); bounded by the target's io-stall watchdog
 assign      _cpuDTACK = ~(!_cpuAS && cpuAddr[23:21] != 3'b111) | (status_turbo & !turbo_dtack_en) | scsi_bus_hold | cpu_wait_hold;
 
-wire        cpu_en_p      = status_turbo ? clk16_en_p : clk8_en_p & !cpu_skip;
-wire        cpu_en_n      = status_turbo ? clk16_en_n : clk8_en_n & !cpu_skip;
+wire        cpu_en_p      = status_turbo ? clk16_en_p : clk8_en_p;
+wire        cpu_en_n      = status_turbo ? clk16_en_n : clk8_en_n;
 
 wire        is68000       = status_cpu == 0;
 
-// Real Plus/SE wait states and the 7.8336 MHz CPU clock; 68000 at 8 MHz only
+// Real Plus/SE wait states; 68000 at 8 MHz only
 cpu_wait cpu_wait
 (
 	.clk         ( clk_sys                  ),
@@ -533,8 +533,7 @@ cpu_wait cpu_wait
 	.selectSCC   ( selectSCC                ),
 	.phase       (                          ),
 	.display     (                          ),
-	.hold        ( cpu_wait_hold            ),
-	.cpu_skip    ( cpu_skip                 )
+	.hold        ( cpu_wait_hold            )
 );
 assign      _cpuReset_o   = is68000 ? fx68_reset_n : tg68_reset_n;
 assign      _cpuRW        = is68000 ? fx68_rw : tg68_rw;
@@ -685,6 +684,7 @@ addrController_top ac0
 	.vsync(vsync),
 	._hblank(_hblank),
 	._vblank(_vblank),
+	.de(vid_de),
 	.loadPixels(loadPixels),
 	.vid_alt(vid_alt),
 	.memoryOverlayOn(memoryOverlayOn),
@@ -724,7 +724,7 @@ dataController_top #(.SCSI_DEVS(SCSI_DEVS), .SCSI_CD_DEV(SCSI_CD_DEV)) dc0
 	.clk32(clk_sys), 
 	.clk8_en_p(clk8_en_p),
 	.clk8_en_n(clk8_en_n),
-	.cpu_skip(cpu_skip),
+	.clk16_en_p(clk16_en_p),
 	.clk16_en_n(clk16_en_n),
 	.E_rising(E_rising),
 	.E_falling(E_falling),
