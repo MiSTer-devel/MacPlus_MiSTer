@@ -1,9 +1,9 @@
 module dataController_top(
 	// clocks:
-	input clk32,					// 32.5 MHz pixel clock
+	input clk32,					// clk_sys, 31.3344 MHz (2x the Plus dot clock)
 	input clk8_en_p,
 	input clk8_en_n,
-	input cpu_skip,     // this clk8 is not a CPU clock (cpu_wait.v)
+	input clk16_en_p,		// the pixel clock enable, for the video shifter
 	input clk16_en_n,		// for the IWM read-latch clear only, see iwm.v
 	input E_rising,
 	input E_falling,
@@ -276,23 +276,13 @@ module dataController_top(
 		.sd_buff_wr(sd_buff_wr)
 	);
 
-	// count vblanks, and set 1 second interrupt after 60 vblanks
-	reg [5:0] vblankCount;
-	reg _lastVblank;
-	always @(posedge clk32) begin
-		if (clk8_en_n) begin
-			_lastVblank <= _vblank;
-			if (_vblank == 1'b0 && _lastVblank == 1'b1) begin
-				if (vblankCount != 59) begin
-					vblankCount <= vblankCount + 1'b1;
-				end
-				else begin
-					vblankCount <= 6'h0;
-				end
-			end
-		end
-	end
-	wire onesec = vblankCount == 59;
+	// one-second tick to VIA CA2 from clk_sys, as the RTC's own crystal;
+	// 60 VBLs would gain 0.25% at 60.147 Hz
+	localparam [24:0] ONE_SEC = 25'd31_334_400;	// clk32 = clk_sys
+	reg [24:0] secCount = 25'd0;
+	always @(posedge clk32)
+		secCount <= (secCount == ONE_SEC - 1'd1) ? 25'd0 : secCount + 1'd1;
+	wire onesec = secCount >= ONE_SEC - ONE_SEC / 60;
 
 	// Mac SE ROM overlay switch
 	reg  SEOverlay;
@@ -500,7 +490,6 @@ module dataController_top(
 		.cen(clk8_en_n),
 		.cen16(clk16_en_n),
 		.turbo(turbo),
-		.cpu_tick(!cpu_skip),
 		._reset(_cpuReset),
 		.selectIWM(selectIWM),
 		._cpuRW(_cpuRW),
@@ -579,6 +568,7 @@ module dataController_top(
 	// Video
 	videoShifter vs(
 		.clk32(clk32), 
+		.pix_en(clk16_en_p),
 		.memoryLatch(memoryLatch),
 		.dataIn(memoryDataIn),
 		.loadPixels(loadPixels), 

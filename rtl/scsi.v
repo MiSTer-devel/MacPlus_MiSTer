@@ -1346,8 +1346,8 @@ wire [15:0] tlen10 = { cmd[7], cmd[8] };
 // WDOG_LOG is overridden down to a few thousand cycles by the testbenches so the
 // recovery can be exercised in reasonable sim time. The timeout VALUE is not the
 // thing under test -- the recovery behaviour is.
-parameter SPINUP_LOG = 27;              // 2^27 clks @32.5MHz = ~4.1 s spin-up
-parameter WDOG_LOG = 22;               // 2^22 clks @32.5MHz = ~129 ms
+parameter SPINUP_LOG = 27;              // 2^27 clks @31.3344MHz = ~4.3 s spin-up
+parameter WDOG_LOG = 22;               // 2^22 clks @31.3344MHz = ~134 ms
 
 // ---- IO-stall watchdog ----------------------------------------------------
 // The bus watchdog above is RESET by io_busy, because a legitimate HPS sector
@@ -1364,7 +1364,7 @@ parameter WDOG_LOG = 22;               // 2^22 clks @32.5MHz = ~129 ms
 // is not optional: io_busy suppresses REQ, so without it the abort could not
 // even send its own CHECK CONDITION, and the next command would inherit the
 // wedge (the same failure the any_rst clear exists to prevent).
-parameter IOWDOG_LOG = 24;             // 2^24 clks @32.5MHz = ~516 ms
+parameter IOWDOG_LOG = 24;             // 2^24 clks @31.3344MHz = ~535 ms
 reg [IOWDOG_LOG-1:0] iowdog = 0;
 wire iowdog_expired = &iowdog;
 wire iostall_abort  = iowdog_expired;
@@ -1660,7 +1660,7 @@ wire ca_grant = (phase == PHASE_IDLE || (cmd_read && phase == PHASE_DATA_OUT))
                 && !io_rd_d && !io_wr && !io_ack && mounted;
 
 generate if (CDROM != 0) begin : g_cd_audio
-	cd_audio #(.CLK_HZ(32'd32_500_000)) cd_audio_i (   // clk_sys rate; audio pitch verifies it
+	cd_audio #(.CLK_HZ(32'd31_334_400)) cd_audio_i (   // clk_sys rate; audio pitch verifies it
 		// NOT .rst(rst): scsi.v's `rst` is the SCSI BUS reset (ICR RST from the
 		// initiator), and cd_audio's `rst` means SYSTEM reset. Tying both to the
 		// bus reset would wipe the TOC every time a driver resets the bus, which

@@ -3,7 +3,7 @@
 module addrController_top(
 	// clocks:
 	input clk,
-	output clk8,						// 8.125 MHz CPU clock
+	output clk8,						// 7.8336 MHz CPU clock
 	output clk8_en_p,
 	output clk8_en_n,
 	output clk16_en_p,
@@ -48,6 +48,7 @@ module addrController_top(
 	output vsync,
 	output _hblank,
 	output _vblank,
+	output de,				// VGA_DE: exactly the 512 x 342 shifter pixels
 	output loadPixels,
 	input  vid_alt,
 		
@@ -89,55 +90,32 @@ module addrController_top(
 );
 
 	// -------------- audio engine ---------------
-	// On real Mac hardware, the ASG PAL reads one sound sample per horizontal
-	// line with perfectly periodic timing (one Mac line ≈ 352 clk8 at 7.8336 MHz).
-	// The Mac has exactly 370 lines per frame, so 370 samples at 22,254 Hz.
-	//
-	// The MiSTer uses 806 VGA lines (168 clk8 each) = 135,408 clk8 per frame.
-	// A Bresenham divider distributes 370 address advances across the frame.
-	//
-	// Previous implementation ran the Bresenham on sndReadAck events (every 16
-	// clk8), giving ±16 clk8 jitter (~4.4%). This version runs at clk8 granularity,
-	// reducing jitter to ±1 clk8 (~0.27%) — closely matching the real hardware's
-	// line-synchronous, zero-jitter timing.
+	// As on the real Mac, one sound word per scan line, 370 a frame: the scan
+	// advances where _hblank rises and restarts at the VBL (line 0).
 
 	assign loadSound = sndReadAck;
 
-	// sndAdvance pulses (one clk8 wide) when the Bresenham divider advances
-	// audioAddr. dataController_top uses this to commit the pre-buffered SDRAM
-	// sample to the audio output with clk8-level timing precision, eliminating
-	// the 0-15 clk8 output latency jitter from sndReadAck quantisation.
+	// sndAdvance pulses (one clk8 wide) when the scan advances audioAddr;
+	// dataController_top commits the pre-buffered sample to the output on it.
 	reg sndAdvance;
 	assign snd_advance = sndAdvance;
 
-	localparam [17:0] SND_SIZE = 18'd135408;  // clk8 events per frame (168×806)
-	localparam [17:0] SND_STEP = 18'd370;     // Bresenham step: 370 overflows per frame,
-	                                           // but the last coincides with vblank reset
-	                                           // (if takes priority over else-if), so
-	                                           // 369 actual advances + initial addr = 370 samples
-
 	reg [21:0] audioAddr;
-	reg [17:0] snd_div;
 
-	wire [17:0] snd_div_next = snd_div + SND_STEP;
-
-	reg vblankD;
+	reg vblankD, hblankD;
 	always @(posedge clk) begin
 		if (clk8_en_p) begin
 			vblankD <= _vblank;
+			hblankD <= _hblank;
 			sndAdvance <= 1'b0;
 
-			// falling edge of _vblank = begin of vblank phase
+			// falling edge of _vblank = begin of vblank phase = start of line 0
 			if (vblankD && !_vblank) begin
 				audioAddr <= snd_alt ? 22'h3FA100 : 22'h3FFD00;
-				snd_div <= 18'd0;
 				sndAdvance <= 1'b1; // commit first sample at vblank
-			end else if (snd_div_next >= SND_SIZE) begin
-				snd_div <= snd_div_next - SND_SIZE;
+			end else if (!hblankD && _hblank) begin	// start of lines 1-369
 				audioAddr <= audioAddr + 22'd2;
 				sndAdvance <= 1'b1;
-			end else begin
-				snd_div <= snd_div_next;
 			end
 		end
 	end
@@ -183,7 +161,7 @@ module addrController_top(
 	wire [21:0] videoAddr;
 	
 	// RAM/ROM control signals
-	wire videoControlActive = _hblank;
+	wire videoControlActive = loadPixels;	// every other video slot carries a word
 
 	assign _romOE = ~(cpuBusControl && selectROM && _cpuRW);
 	
@@ -290,6 +268,7 @@ module addrController_top(
 	videoTimer vt(
 		.clk(clk),
 		.clk_en(clk8_en_p),
+		.pix_en(clk16_en_p),
 		.busCycle(busCycle), 
 		.vid_alt(vid_alt),
 		.videoAddr(videoAddr), 
@@ -297,6 +276,7 @@ module addrController_top(
 		.vsync(vsync), 
 		._hblank(_hblank),
 		._vblank(_vblank), 
+		.de(de),
 		.loadPixels(loadPixels));
 		
 endmodule
